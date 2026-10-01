@@ -140,22 +140,33 @@ function MainApp() {
     }
   }, [api, currentPeriod]);
 
-  // REALTIME SYNCRONIZATION SUPABASE
+  // REALTIME SYNCRONIZATION SUPABASE (Multi-Device & Delete Sync)
   useEffect(() => {
     fetchData();
 
     if (!supabase) return;
 
-    // Berlangganan Realtime Postgres Changes
+    // Berlangganan Realtime Postgres Changes untuk setiap tabel agar hapus/tambah/ubah langsung sinkron ke semua perangkat
     const channel = supabase
-      .channel('schema-db-changes')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public' },
-        () => {
-          fetchData();
-        }
-      )
+      .channel('supabase-realtime-multidevice-sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' }, () => {
+        fetchData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'debts' }, () => {
+        fetchData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'debt_ledger_entries' }, () => {
+        fetchData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'savings' }, () => {
+        fetchData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'business_transactions' }, () => {
+        fetchData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () => {
+        fetchData();
+      })
       .subscribe();
 
     return () => {
@@ -184,24 +195,17 @@ function MainApp() {
     await fetchData();
   };
 
-  // Hapus Transaksi Langsung dari Supabase
+  // Hapus Transaksi Seketika dari Layar & Database Supabase
   const handleDeleteTransaction = async (id: number) => {
+    // 1. Optimistic removal: Langsung hilangkan dari layar perangkat ini
+    setTransactions(prev => prev.filter(t => t.id !== id));
     try {
       if (supabase) {
-        const { error } = await supabase
-          .from('transactions')
-          .delete()
-          .eq('id', id);
-
-        if (error) {
-          console.warn('Hapus via Supabase client gagal, mencoba via API:', error.message);
-          await api.deleteTransaction(id);
-        }
-      } else {
-        await api.deleteTransaction(id);
+        await supabase.from('transactions').delete().eq('id', id);
       }
-    } catch (err) {
       await api.deleteTransaction(id);
+    } catch (err) {
+      console.warn('Gagal menghapus transaksi:', err);
     }
     await fetchData();
   };
@@ -231,23 +235,23 @@ function MainApp() {
     await fetchData();
   };
 
-  // Hapus Hutang Langsung dari Supabase
+  // Hapus Hutang Seketika dari Layar & Database Supabase
   const handleDeleteDebt = async (id: number) => {
-    try {
-      if (supabase) {
-        const { error } = await supabase.from('debts').delete().eq('id', id);
-        if (error) {
-          await api.deleteDebt(id);
-        }
-      } else {
-        await api.deleteDebt(id);
-      }
-    } catch (err) {
-      await api.deleteDebt(id);
-    }
-
+    // 1. Optimistic removal
+    setDebts(prev => prev.filter(d => d.id !== id));
     if (selectedDebtForLedger?.id === id) {
       setSelectedDebtForLedger(null);
+    }
+    try {
+      if (supabase) {
+        await Promise.all([
+          supabase.from('debt_ledger_entries').delete().eq('debt_id', id),
+          supabase.from('debts').delete().eq('id', id),
+        ]);
+      }
+      await api.deleteDebt(id);
+    } catch (err) {
+      console.warn('Gagal menghapus hutang:', err);
     }
     await fetchData();
   };
@@ -297,19 +301,17 @@ function MainApp() {
     await fetchData();
   };
 
-  // Hapus Tabungan Langsung dari Supabase
+  // Hapus Tabungan Seketika dari Layar & Database Supabase
   const handleDeleteSaving = async (id: number) => {
+    // 1. Optimistic removal
+    setSavings(prev => prev.filter(s => s.id !== id));
     try {
       if (supabase) {
-        const { error } = await supabase.from('savings').delete().eq('id', id);
-        if (error) {
-          await api.deleteSaving(id);
-        }
-      } else {
-        await api.deleteSaving(id);
+        await supabase.from('savings').delete().eq('id', id);
       }
-    } catch (err) {
       await api.deleteSaving(id);
+    } catch (err) {
+      console.warn('Gagal menghapus tabungan:', err);
     }
     await fetchData();
   };

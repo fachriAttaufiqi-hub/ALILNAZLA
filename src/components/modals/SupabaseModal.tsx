@@ -144,9 +144,9 @@ export const SupabaseModal: React.FC<SupabaseModalProps> = ({
     }, 2500);
   };
 
-  // SQL RLS Fix
+  // SQL RLS Fix & Realtime Activation
   const rlsFixSql = `-- ========================================================
--- SOLUSI: AGAR INPUT MASUK & TIDAK TERBLOKIR DI SUPABASE
+-- SOLUSI: AGAR INPUT MASUK, TERHAPUS & REALTIME SINKRON DI SEMUA HP/LAPTOP
 -- Salin & Jalankan di Supabase -> SQL Editor -> Run
 -- ========================================================
 
@@ -157,6 +157,16 @@ ALTER TABLE IF EXISTS debt_ledger_entries DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS business_transactions DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS savings DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS monthly_reports DISABLE ROW LEVEL SECURITY;
+
+-- Aktifkan Realtime Replication untuk seluruh tabel
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE transactions, debts, debt_ledger_entries, business_transactions, savings, users;
+  END IF;
+EXCEPTION WHEN OTHERS THEN
+  NULL;
+END $$;
 `;
 
   // SQL DDL Schema Script for Supabase

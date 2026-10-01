@@ -333,7 +333,7 @@ export class ApiClient {
             supabase.from('savings').select('*').order('id', { ascending: false }),
           ]);
 
-          if (!txRes.error && txRes.data && txRes.data.length > 0) {
+          if (!txRes.error && txRes.data !== null) {
             localCache.transactions = txRes.data.map((row: any) => ({
               id: row.id,
               userUid: row.user_uid || 'keluarga_utama',
@@ -348,7 +348,7 @@ export class ApiClient {
             saveToStorage(STORAGE_KEYS.TRANSACTIONS, localCache.transactions);
           }
 
-          if (!debtRes.error && debtRes.data && debtRes.data.length > 0) {
+          if (!debtRes.error && debtRes.data !== null) {
             localCache.debts = debtRes.data.map((row: any) => ({
               id: row.id,
               userUid: row.user_uid || 'keluarga_utama',
@@ -365,7 +365,7 @@ export class ApiClient {
             saveToStorage(STORAGE_KEYS.DEBTS, localCache.debts);
           }
 
-          if (!savRes.error && savRes.data && savRes.data.length > 0) {
+          if (!savRes.error && savRes.data !== null) {
             localCache.savings = savRes.data.map((row: any) => ({
               id: row.id,
               userUid: row.user_uid || 'keluarga_utama',
@@ -433,47 +433,19 @@ export class ApiClient {
               .select('*')
               .order('date', { ascending: false });
 
-            if (!error && data) {
-              if (data.length > 0) {
-                localCache.transactions = data.map((row: any) => ({
-                  id: row.id,
-                  userUid: row.user_uid || 'keluarga_utama',
-                  type: row.type,
-                  category: row.category,
-                  amount: String(row.amount),
-                  date: row.date,
-                  wallet: row.wallet || 'Tunai',
-                  notes: row.notes || '',
-                  createdAt: row.created_at,
-                }));
-                saveToStorage(STORAGE_KEYS.TRANSACTIONS, localCache.transactions);
-              } else if (localCache.transactions.length > 0) {
-                // Auto seed to Supabase from initial local data so all devices share
-                const toInsert = localCache.transactions.map(t => ({
-                  user_uid: 'keluarga_utama',
-                  type: t.type,
-                  category: t.category,
-                  amount: t.amount,
-                  date: t.date,
-                  wallet: t.wallet || 'Tunai',
-                  notes: t.notes || '',
-                }));
-                const { data: inserted } = await supabase.from('transactions').insert(toInsert).select();
-                if (inserted && inserted.length > 0) {
-                  localCache.transactions = inserted.map((row: any) => ({
-                    id: row.id,
-                    userUid: row.user_uid || 'keluarga_utama',
-                    type: row.type,
-                    category: row.category,
-                    amount: String(row.amount),
-                    date: row.date,
-                    wallet: row.wallet || 'Tunai',
-                    notes: row.notes || '',
-                    createdAt: row.created_at,
-                  }));
-                  saveToStorage(STORAGE_KEYS.TRANSACTIONS, localCache.transactions);
-                }
-              }
+            if (!error && data !== null) {
+              localCache.transactions = data.map((row: any) => ({
+                id: row.id,
+                userUid: row.user_uid || 'keluarga_utama',
+                type: row.type,
+                category: row.category,
+                amount: String(row.amount),
+                date: row.date,
+                wallet: row.wallet || 'Tunai',
+                notes: row.notes || '',
+                createdAt: row.created_at,
+              }));
+              saveToStorage(STORAGE_KEYS.TRANSACTIONS, localCache.transactions);
             }
           } catch (e: any) {
             console.warn('Supabase get transactions error:', e?.message);
@@ -577,51 +549,21 @@ export class ApiClient {
         if (supabase) {
           try {
             const { data, error } = await supabase.from('debts').select('*').order('id', { ascending: false });
-            if (!error && data) {
-              if (data.length > 0) {
-                localCache.debts = data.map((row: any) => ({
-                  id: row.id,
-                  userUid: row.user_uid || 'keluarga_utama',
-                  type: row.type,
-                  person: row.person,
-                  totalAmount: String(row.total_amount),
-                  paidAmount: String(row.paid_amount || '0'),
-                  dueDate: row.due_date || null,
-                  status: row.status || 'active',
-                  notes: row.notes || '',
-                  createdAt: row.created_at,
-                  updatedAt: row.updated_at,
-                }));
-                saveToStorage(STORAGE_KEYS.DEBTS, localCache.debts);
-              } else if (localCache.debts.length > 0) {
-                const toInsert = localCache.debts.map(d => ({
-                  user_uid: 'keluarga_utama',
-                  type: d.type,
-                  person: d.person,
-                  total_amount: d.totalAmount,
-                  paid_amount: d.paidAmount,
-                  due_date: d.dueDate,
-                  status: d.status,
-                  notes: d.notes,
-                }));
-                const { data: inserted } = await supabase.from('debts').insert(toInsert).select();
-                if (inserted && inserted.length > 0) {
-                  localCache.debts = inserted.map((row: any) => ({
-                    id: row.id,
-                    userUid: row.user_uid || 'keluarga_utama',
-                    type: row.type,
-                    person: row.person,
-                    totalAmount: String(row.total_amount),
-                    paidAmount: String(row.paid_amount || '0'),
-                    dueDate: row.due_date || null,
-                    status: row.status || 'active',
-                    notes: row.notes || '',
-                    createdAt: row.created_at,
-                    updatedAt: row.updated_at,
-                  }));
-                  saveToStorage(STORAGE_KEYS.DEBTS, localCache.debts);
-                }
-              }
+            if (!error && data !== null) {
+              localCache.debts = data.map((row: any) => ({
+                id: row.id,
+                userUid: row.user_uid || 'keluarga_utama',
+                type: row.type,
+                person: row.person,
+                totalAmount: String(row.total_amount),
+                paidAmount: String(row.paid_amount || '0'),
+                dueDate: row.due_date || null,
+                status: row.status || 'active',
+                notes: row.notes || '',
+                createdAt: row.created_at,
+                updatedAt: row.updated_at,
+              }));
+              saveToStorage(STORAGE_KEYS.DEBTS, localCache.debts);
             }
           } catch (e: any) {
             console.warn('Supabase fetch debts error:', e?.message);
@@ -1014,51 +956,21 @@ export class ApiClient {
         if (supabase) {
           try {
             const { data, error } = await supabase.from('savings').select('*').order('id', { ascending: false });
-            if (!error && data) {
-              if (data.length > 0) {
-                localCache.savings = data.map((row: any) => ({
-                  id: row.id,
-                  userUid: row.user_uid || 'keluarga_utama',
-                  name: row.name,
-                  targetAmount: String(row.target_amount),
-                  currentAmount: String(row.current_amount || '0'),
-                  targetDate: row.target_date || null,
-                  category: row.category || 'Umum',
-                  color: row.color || '#10b981',
-                  notes: row.notes || '',
-                  createdAt: row.created_at,
-                  updatedAt: row.updated_at,
-                }));
-                saveToStorage(STORAGE_KEYS.SAVINGS, localCache.savings);
-              } else if (localCache.savings.length > 0) {
-                const toInsert = localCache.savings.map(s => ({
-                  user_uid: 'keluarga_utama',
-                  name: s.name,
-                  target_amount: s.targetAmount,
-                  current_amount: s.currentAmount,
-                  target_date: s.targetDate,
-                  category: s.category,
-                  color: s.color,
-                  notes: s.notes,
-                }));
-                const { data: inserted } = await supabase.from('savings').insert(toInsert).select();
-                if (inserted && inserted.length > 0) {
-                  localCache.savings = inserted.map((row: any) => ({
-                    id: row.id,
-                    userUid: row.user_uid || 'keluarga_utama',
-                    name: row.name,
-                    targetAmount: String(row.target_amount),
-                    currentAmount: String(row.current_amount || '0'),
-                    targetDate: row.target_date || null,
-                    category: row.category || 'Umum',
-                    color: row.color || '#10b981',
-                    notes: row.notes || '',
-                    createdAt: row.created_at,
-                    updatedAt: row.updated_at,
-                  }));
-                  saveToStorage(STORAGE_KEYS.SAVINGS, localCache.savings);
-                }
-              }
+            if (!error && data !== null) {
+              localCache.savings = data.map((row: any) => ({
+                id: row.id,
+                userUid: row.user_uid || 'keluarga_utama',
+                name: row.name,
+                targetAmount: String(row.target_amount),
+                currentAmount: String(row.current_amount || '0'),
+                targetDate: row.target_date || null,
+                category: row.category || 'Umum',
+                color: row.color || '#10b981',
+                notes: row.notes || '',
+                createdAt: row.created_at,
+                updatedAt: row.updated_at,
+              }));
+              saveToStorage(STORAGE_KEYS.SAVINGS, localCache.savings);
             }
           } catch (e: any) {
             console.warn('Supabase fetch savings error:', e?.message);
@@ -1216,52 +1128,21 @@ export class ApiClient {
         if (supabase) {
           try {
             const { data, error } = await supabase.from('business_transactions').select('*').order('date', { ascending: false });
-            if (!error && data) {
-              if (data.length > 0) {
-                localCache.business = data.map((row: any) => ({
-                  id: row.id,
-                  userUid: row.user_uid || 'keluarga_utama',
-                  type: row.type,
-                  category: row.category,
-                  amount: String(row.amount),
-                  date: row.date,
-                  wallet: row.wallet || 'Kas Usaha',
-                  customerOrVendor: row.customer_or_vendor || '',
-                  invoiceNumber: row.invoice_number || '',
-                  notes: row.notes || '',
-                  createdAt: row.created_at,
-                }));
-                saveToStorage(STORAGE_KEYS.BUSINESS, localCache.business);
-              } else if (localCache.business.length > 0) {
-                const toInsert = localCache.business.map(b => ({
-                  user_uid: 'keluarga_utama',
-                  type: b.type,
-                  category: b.category,
-                  amount: b.amount,
-                  date: b.date,
-                  wallet: b.wallet || 'Kas Usaha',
-                  customer_or_vendor: b.customerOrVendor || '',
-                  invoice_number: b.invoiceNumber || '',
-                  notes: b.notes || '',
-                }));
-                const { data: inserted } = await supabase.from('business_transactions').insert(toInsert).select();
-                if (inserted && inserted.length > 0) {
-                  localCache.business = inserted.map((row: any) => ({
-                    id: row.id,
-                    userUid: row.user_uid || 'keluarga_utama',
-                    type: row.type,
-                    category: row.category,
-                    amount: String(row.amount),
-                    date: row.date,
-                    wallet: row.wallet || 'Kas Usaha',
-                    customerOrVendor: row.customer_or_vendor || '',
-                    invoiceNumber: row.invoice_number || '',
-                    notes: row.notes || '',
-                    createdAt: row.created_at,
-                  }));
-                  saveToStorage(STORAGE_KEYS.BUSINESS, localCache.business);
-                }
-              }
+            if (!error && data !== null) {
+              localCache.business = data.map((row: any) => ({
+                id: row.id,
+                userUid: row.user_uid || 'keluarga_utama',
+                type: row.type,
+                category: row.category,
+                amount: String(row.amount),
+                date: row.date,
+                wallet: row.wallet || 'Kas Usaha',
+                customerOrVendor: row.customer_or_vendor || '',
+                invoiceNumber: row.invoice_number || '',
+                notes: row.notes || '',
+                createdAt: row.created_at,
+              }));
+              saveToStorage(STORAGE_KEYS.BUSINESS, localCache.business);
             }
           } catch (e: any) {
             console.warn('Supabase fetch business error:', e?.message);
