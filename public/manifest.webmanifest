@@ -1,0 +1,18 @@
+{
+  "short_name": "KeluargaFin",
+  "name": "KeluargaFin - Kelola Keuangan Rumah Tangga",
+  "icons": [
+    {
+      "src": "icons/icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/ALILNAZLA/",
+  "scope": "/ALILNAZLA/",
+  "background_color": "#020617",
+  "theme_color": "#ea7a38",
+  "display": "standalone",
+  "orientation": "portrait"
+}

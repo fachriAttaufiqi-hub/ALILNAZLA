@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>KeluargaFin - Kelola Keuangan Rumah Tangga Modern</title>
+    <meta name="description" content="Aplikasi pencatatan pemasukan, pengeluaran, hutang, piutang, dan pos tabungan keluarga dengan laporan bulanan otomatis, analisis arus kas, dan database Cloud SQL terenkripsi." />
+    <meta property="og:title" content="KeluargaFin - Kelola Keuangan Rumah Tangga Modern" />
+    <meta property="og:description" content="Aplikasi pencatatan pemasukan, pengeluaran, hutang, piutang, dan pos tabungan keluarga dengan laporan bulanan otomatis, analisis arus kas, dan database Cloud SQL terenkripsi." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="theme-color" content="#ea7a38" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    
+    <!-- DIPAERBAIKI: Mengubah path mutlak (/) menjadi path relatif (./) -->
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" type="image/svg+xml" href="./icons/icon.svg" />
+    <link rel="apple-touch-icon" href="./icons/icon.svg" />
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          // DIPERBAIKI: Mengubah '/sw.js' menjadi './sw.js'
+          navigator.serviceWorker.register('./sw.js').catch((err) => {
+            console.log('SW registration note:', err);
+          });
+        });
+      }
+    </script>
+  </head>
+  <body class="font-sans antialiased bg-slate-950 text-slate-100 min-h-screen selection:bg-emerald-500 selection:text-white">
+    <div id="root"></div>
+    <script type="module" src="./src/main.tsx"></script>
+  </body>
+</html>

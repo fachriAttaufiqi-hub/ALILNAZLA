@@ -1,0 +1,6 @@
+{
+  "name": "KeluargaFin - Kelola Keuangan Rumah Tangga Modern",
+  "description": "Aplikasi pencatatan pemasukan, pengeluaran, hutang, piutang, dan pos tabungan keluarga dengan laporan bulanan otomatis, analisis arus kas, dan database Cloud SQL terenkripsi.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

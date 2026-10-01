@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ea7a38" />
+      <stop offset="50%" stop-color="#f59e0b" />
+      <stop offset="100%" stop-color="#d97706" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+  <!-- Background with rounded corners -->
+  <rect width="512" height="512" rx="112" fill="url(#grad)" />
+  
+  <!-- Subtle inner circle highlight -->
+  <circle cx="256" cy="256" r="210" fill="none" stroke="rgba(255,255,255,0.18)" stroke-width="6" />
+
+  <!-- Wallet / Financial Shield Symbol -->
+  <g filter="url(#shadow)" transform="translate(106, 116)">
+    <!-- Base Wallet Shape -->
+    <rect x="10" y="40" width="280" height="200" rx="36" fill="#ffffff" />
+    
+    <!-- Flap -->
+    <path d="M 10 76 C 10 40 40 10 76 10 L 224 10 C 260 10 290 40 290 76 L 290 100 L 10 100 Z" fill="#fff7ed" />
+    
+    <!-- Clasp Pocket -->
+    <rect x="180" y="105" width="115" height="70" rx="20" fill="#ea7a38" />
+    <circle cx="215" cy="140" r="14" fill="#ffffff" />
+    <circle cx="215" cy="140" r="8" fill="#f59e0b" />
+
+    <!-- Coin accents -->
+    <circle cx="85" cy="145" r="32" fill="#fef3c7" stroke="#f59e0b" stroke-width="5" />
+    <text x="85" y="157" font-family="Arial, sans-serif" font-weight="900" font-size="34" fill="#d97706" text-anchor="middle">Rp</text>
+  </g>
+</svg>
