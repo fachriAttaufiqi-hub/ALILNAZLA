@@ -1,18 +1,7 @@
-const CACHE_NAME = 'keluargafin-v1';
-const ASSETS_TO_CACHE = [
-  '/ALILNAZLA/',
-  '/ALILNAZLA/index.html',
-  '/ALILNAZLA/manifest.webmanifest',
-  '/ALILNAZLA/icons/icon.svg'
-];
+const CACHE_NAME = 'keluargafin-v2';
 
 // Install Event
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS_TO_CACHE);
-    })
-  );
   self.skipWaiting();
 });
 
@@ -32,23 +21,27 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Fetch Event
+// Fetch Event - Network First with Cache Fallback for offline support
 self.addEventListener('fetch', (event) => {
-  // Hanya cache permintaan GET
+  // Hanya tangani GET requests
   if (event.request.method !== 'GET') return;
+
+  // Lewati request ke Supabase atau API eksternal agar selalu realtime
+  const url = event.request.url;
+  if (url.includes('supabase.co') || url.includes('/api/')) return;
 
   event.respondWith(
     fetch(event.request)
       .then((response) => {
-        // Update cache jika berhasil mengambil data baru dari jaringan
-        const responseClone = response.clone();
-        caches.open(CACHE_NAME).then((cache) => {
-          cache.put(event.request, responseClone);
-        });
+        if (response && response.status === 200 && response.type === 'basic') {
+          const responseClone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseClone);
+          });
+        }
         return response;
       })
       .catch(() => {
-        // Jika offline, ambil dari cache
         return caches.match(event.request);
       })
   );

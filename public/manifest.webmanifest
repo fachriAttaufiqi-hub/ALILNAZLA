@@ -9,8 +9,8 @@
       "purpose": "any maskable"
     }
   ],
-  "start_url": "/ALILNAZLA/",
-  "scope": "/ALILNAZLA/",
+  "start_url": "./",
+  "scope": "./",
   "background_color": "#020617",
   "theme_color": "#ea7a38",
   "display": "standalone",

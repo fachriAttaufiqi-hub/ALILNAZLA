@@ -5,8 +5,8 @@ import { defineConfig } from 'vite';
 
 export default defineConfig(() => {
   return {
-    // Otomatis gunakan /ALILNAZLA/ saat build di GitHub Actions, dan / saat di development / dev server
-    base: process.env.GITHUB_ACTIONS ? '/ALILNAZLA/' : '/',
+    // Menggunakan path relatif (./) agar otomatis bekerja di semua repositori GitHub Pages, root domain, maupun subfolder tanpa blank page
+    base: './',
     plugins: [react(), tailwindcss()],
     publicDir: 'public',
     resolve: {
