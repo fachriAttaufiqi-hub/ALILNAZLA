@@ -1,9 +1,11 @@
 const CACHE_NAME = 'keluargafin-v2';
 
+// Install Event
 self.addEventListener('install', (event) => {
   self.skipWaiting();
 });
 
+// Activate Event
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((cacheNames) => {
@@ -19,9 +21,12 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
+// Fetch Event - Network First with Cache Fallback
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+
   const url = event.request.url;
+  // Lewati request Supabase & API agar data selalu realtime
   if (url.includes('supabase.co') || url.includes('/api/')) return;
 
   event.respondWith(
@@ -35,6 +40,8 @@ self.addEventListener('fetch', (event) => {
         }
         return response;
       })
-      .catch(() => caches.match(event.request))
+      .catch(() => {
+        return caches.match(event.request);
+      })
   );
 });
