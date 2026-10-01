@@ -552,7 +552,12 @@ function MainApp() {
         api={api}
       />
 
-      <PWAInstallAndSync />
+      <PWAInstallAndSync
+        onTriggerSync={async () => {
+          await api.syncAllLocalToCloud();
+          await fetchData();
+        }}
+      />
     </div>
   );
 }
