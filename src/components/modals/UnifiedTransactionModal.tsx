@@ -306,7 +306,7 @@ export const UnifiedTransactionModal: React.FC<UnifiedTransactionModalProps> = (
               }`}
             >
               <Briefcase className="w-3.5 h-3.5" />
-              <span>Usaha Sampingan</span>
+              <span>Sampingan & Hobi</span>
             </button>
 
             <button
@@ -551,7 +551,7 @@ export const UnifiedTransactionModal: React.FC<UnifiedTransactionModalProps> = (
             </div>
           )}
 
-          {/* TAB 4: USAHA SAMPINGAN */}
+          {/* TAB 4: SAMPINGAN & HOBI */}
           {activeTab === 'business' && (
             <div className="space-y-3.5 p-4 rounded-2xl bg-amber-50/70 border border-amber-200">
               <div className="grid grid-cols-2 gap-2 p-1 bg-amber-100/70 rounded-xl">
@@ -565,7 +565,7 @@ export const UnifiedTransactionModal: React.FC<UnifiedTransactionModalProps> = (
                     bizType === 'income' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-700'
                   }`}
                 >
-                  Omset / Pemasukan Usaha
+                  Pemasukan Sampingan / Hobi
                 </button>
                 <button
                   type="button"
@@ -577,13 +577,13 @@ export const UnifiedTransactionModal: React.FC<UnifiedTransactionModalProps> = (
                     bizType === 'expense' ? 'bg-rose-600 text-white shadow-sm' : 'text-slate-700'
                   }`}
                 >
-                  Beban Operasional Usaha
+                  Pengeluaran / Biaya Hobi
                 </button>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-blue-950">Kategori Usaha</label>
+                  <label className="text-xs font-bold text-blue-950">Kategori Sampingan & Hobi</label>
                   <select
                     value={bizCategory}
                     onChange={(e) => setBizCategory(e.target.value)}
@@ -596,7 +596,7 @@ export const UnifiedTransactionModal: React.FC<UnifiedTransactionModalProps> = (
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-blue-950">Rekening Kas Usaha</label>
+                  <label className="text-xs font-bold text-blue-950">Rekening Kas Sampingan/Hobi</label>
                   <select
                     value={bizWallet}
                     onChange={(e) => setBizWallet(e.target.value)}
@@ -611,10 +611,10 @@ export const UnifiedTransactionModal: React.FC<UnifiedTransactionModalProps> = (
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-blue-950">Pelanggan / Vendor</label>
+                  <label className="text-xs font-bold text-blue-950">Pelanggan / Klien / Toko</label>
                   <input
                     type="text"
-                    placeholder="Nama klien / supplier"
+                    placeholder="Nama klien, pembeli, toko hobi"
                     value={customerOrVendor}
                     onChange={(e) => setCustomerOrVendor(e.target.value)}
                     className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs text-blue-950 focus:outline-none focus:border-orange-500 font-medium"

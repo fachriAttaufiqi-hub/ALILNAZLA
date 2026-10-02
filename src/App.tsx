@@ -465,7 +465,7 @@ function MainApp() {
       </div>
 
       <footer className="no-print border-t border-amber-200/80 bg-white/80 py-4 px-4 text-center text-xs text-slate-600">
-        <p>KeluargaFin &bull; Sistem Pengelolaan Keuangan Rumah Tangga, Buku Pembantu Hutang & Usaha Sampingan &bull; Cloud SQL PostgreSQL Terpadu</p>
+        <p>KeluargaFin &bull; Sistem Pengelolaan Keuangan Rumah Tangga, Buku Pembantu Hutang & Sampingan dan Hobi &bull; Cloud SQL PostgreSQL Terpadu</p>
       </footer>
 
       <UnifiedTransactionModal

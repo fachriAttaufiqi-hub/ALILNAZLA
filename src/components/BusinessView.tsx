@@ -237,18 +237,18 @@ export const BusinessView: React.FC<BusinessViewProps> = ({
         <div>
           <div className="flex items-center gap-2">
             <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 border border-orange-300 uppercase tracking-wider">
-              Buku Keuangan Terpisah
+              Buku Keuangan Mandiri
             </span>
             <span className="text-xs text-slate-500 font-medium">
               Periode: <strong className="text-blue-950 font-bold">{formatMonthIndo(currentPeriod)}</strong>
             </span>
           </div>
           <h1 className="text-2xl font-black text-blue-950 tracking-tight mt-1 flex items-center gap-2.5">
-            <Briefcase className="w-6 h-6 text-orange-600" />
-            <span>Keuangan Usaha Sampingan</span>
+            <Sparkles className="w-6 h-6 text-orange-600" />
+            <span>Keuangan Sampingan & Hobi</span>
           </h1>
           <p className="text-xs text-slate-600 mt-0.5 font-medium">
-            Kelola omset, beban operasional, laba/rugi usaha secara mandiri terpisah dari kebutuhan dapur keluarga
+            Kelola omset jualan, karya hobi, proyek freelance & belanja perlengkapan hobi secara mandiri terpisah dari kas keluarga
           </p>
         </div>
 
@@ -259,7 +259,7 @@ export const BusinessView: React.FC<BusinessViewProps> = ({
             className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold transition-all shadow-md shadow-emerald-950/20 cursor-pointer"
           >
             <Plus className="w-4 h-4" />
-            <span>+ Catat Omset</span>
+            <span>+ Pemasukan Sampingan</span>
           </button>
 
           <button
@@ -267,16 +267,16 @@ export const BusinessView: React.FC<BusinessViewProps> = ({
             className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-300 text-xs font-bold transition-all cursor-pointer shadow-sm"
           >
             <Plus className="w-4 h-4 text-rose-600" />
-            <span>+ Beban Usaha</span>
+            <span>+ Biaya Hobi / Beban</span>
           </button>
 
           <button
             onClick={() => setIsPriveModalOpen(true)}
             className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white text-xs font-extrabold transition-all shadow-md shadow-orange-950/20 cursor-pointer"
-            title="Kirim keuntungan usaha ke rekening rumah tangga"
+            title="Kirim saldo sampingan/hobi ke rekening rumah tangga"
           >
             <SendHorizontal className="w-4 h-4" />
-            <span>Tarik Laba ke Kas Keluarga</span>
+            <span>Tarik Saldo ke Kas Keluarga</span>
           </button>
         </div>
       </div>
@@ -284,10 +284,10 @@ export const BusinessView: React.FC<BusinessViewProps> = ({
       {/* KPI Cards: P&L Summary */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         
-        {/* Total Omset / Pemasukan Usaha */}
+        {/* Total Omset / Pemasukan Sampingan */}
         <div className="rounded-2xl bg-white border border-amber-200/80 p-5 shadow-sm">
           <div className="flex items-center justify-between text-slate-500 mb-2">
-            <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Omset / Pendapatan</span>
+            <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Pemasukan Sampingan/Hobi</span>
             <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center justify-center">
               <TrendingUp className="w-4 h-4" />
             </div>
@@ -296,14 +296,14 @@ export const BusinessView: React.FC<BusinessViewProps> = ({
             {formatRupiah(totalRevenue)}
           </div>
           <p className="text-[11px] text-slate-500 mt-1 font-medium">
-            Penjualan & jasa usaha bulan ini
+            Freelance, karya hobi, jualan & jasa
           </p>
         </div>
 
-        {/* Biaya & Beban Operasional */}
+        {/* Biaya & Perlengkapan Hobi */}
         <div className="rounded-2xl bg-white border border-amber-200/80 p-5 shadow-sm">
           <div className="flex items-center justify-between text-slate-500 mb-2">
-            <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Beban Operasional</span>
+            <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Pengeluaran & Alat Hobi</span>
             <div className="w-8 h-8 rounded-xl bg-rose-50 text-rose-600 border border-rose-200 flex items-center justify-center">
               <TrendingDown className="w-4 h-4" />
             </div>
@@ -312,14 +312,14 @@ export const BusinessView: React.FC<BusinessViewProps> = ({
             {formatRupiah(totalExpense)}
           </div>
           <p className="text-[11px] text-slate-500 mt-1 font-medium">
-            HPP, stok barang, logistik & iklan
+            Bahan, perkakas hobi, stok & kurir
           </p>
         </div>
 
-        {/* Laba Bersih Usaha (Net Profit) */}
+        {/* Laba Bersih / Surplus Sampingan */}
         <div className="rounded-2xl bg-white border border-amber-200/80 p-5 shadow-sm">
           <div className="flex items-center justify-between text-slate-500 mb-2">
-            <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Laba Bersih Usaha</span>
+            <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Surplus Bersih Hobi</span>
             <div className={`w-8 h-8 rounded-xl flex items-center justify-center border ${
               isProfitable ? 'bg-orange-50 text-orange-600 border-orange-200' : 'bg-rose-50 text-rose-700 border-rose-200'
             }`}>
@@ -330,14 +330,14 @@ export const BusinessView: React.FC<BusinessViewProps> = ({
             {formatRupiah(netProfit)}
           </div>
           <p className="text-[11px] text-slate-500 mt-1 font-medium">
-            {isProfitable ? `Surplus laba usaha ${profitMargin}% margin` : 'Defisit operasional usaha'}
+            {isProfitable ? `Surplus dana sampingan ${profitMargin}% margin` : 'Defisit dana hobi/sampingan'}
           </p>
         </div>
 
         {/* Margin & Efisiensi */}
         <div className="rounded-2xl bg-white border border-amber-200/80 p-5 shadow-sm">
           <div className="flex items-center justify-between text-slate-500 mb-2">
-            <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Margin Keuntungan</span>
+            <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Margin Efisiensi</span>
             <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-900 border border-blue-200 flex items-center justify-center">
               <PieChart className="w-4 h-4" />
             </div>
@@ -346,27 +346,27 @@ export const BusinessView: React.FC<BusinessViewProps> = ({
             {profitMargin}%
           </div>
           <p className="text-[11px] text-slate-500 mt-1 font-medium">
-            Dari {transactions.length} mutasi usaha tercatat
+            Dari {transactions.length} mutasi sampingan & hobi
           </p>
         </div>
 
       </div>
 
       {/* Visual Breakdown of Business Categories */}
-      {summary && summary.breakdowns.length > 0 && (
+      {summary && (summary.breakdowns || []).length > 0 && (
         <div className="rounded-2xl bg-white border border-amber-200/80 p-5 shadow-sm space-y-4">
           <h2 className="text-sm font-extrabold text-blue-950 flex items-center gap-2">
             <PieChart className="w-4 h-4 text-orange-600" />
-            <span>Rincian Pos Pendapatan & Pengeluaran Usaha</span>
+            <span>Rincian Pos Pemasukan & Pengeluaran Sampingan/Hobi</span>
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Revenue Breakdowns */}
             <div className="space-y-3">
-              <span className="text-xs font-bold text-emerald-800 uppercase tracking-wider">Sumber Omset</span>
-              {summary.breakdowns.filter(b => b.type === 'income').length === 0 ? (
-                <p className="text-xs text-slate-500 italic">Belum ada pemasukan usaha di periode ini.</p>
+              <span className="text-xs font-bold text-emerald-800 uppercase tracking-wider">Sumber Pemasukan</span>
+              {(summary.breakdowns || []).filter(b => b.type === 'income').length === 0 ? (
+                <p className="text-xs text-slate-500 italic">Belum ada pemasukan sampingan di periode ini.</p>
               ) : (
-                summary.breakdowns.filter(b => b.type === 'income').map(item => (
+                (summary.breakdowns || []).filter(b => b.type === 'income').map(item => (
                   <div key={item.category} className="space-y-1">
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-slate-700 font-semibold">{item.category}</span>
@@ -382,11 +382,11 @@ export const BusinessView: React.FC<BusinessViewProps> = ({
 
             {/* Expense Breakdowns */}
             <div className="space-y-3">
-              <span className="text-xs font-bold text-rose-800 uppercase tracking-wider">Pos Beban & Biaya</span>
-              {summary.breakdowns.filter(b => b.type === 'expense').length === 0 ? (
-                <p className="text-xs text-slate-500 italic">Belum ada beban operasional di periode ini.</p>
+              <span className="text-xs font-bold text-rose-800 uppercase tracking-wider">Pos Pengeluaran & Biaya Hobi</span>
+              {(summary.breakdowns || []).filter(b => b.type === 'expense').length === 0 ? (
+                <p className="text-xs text-slate-500 italic">Belum ada beban belanja hobi di periode ini.</p>
               ) : (
-                summary.breakdowns.filter(b => b.type === 'expense').map(item => (
+                (summary.breakdowns || []).filter(b => b.type === 'expense').map(item => (
                   <div key={item.category} className="space-y-1">
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-slate-700 font-semibold">{item.category}</span>
@@ -422,7 +422,7 @@ export const BusinessView: React.FC<BusinessViewProps> = ({
               filterType === 'income' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-600 hover:text-emerald-700'
             }`}
           >
-            Omset
+            Pemasukan
           </button>
           <button
             onClick={() => setFilterType('expense')}
@@ -430,7 +430,7 @@ export const BusinessView: React.FC<BusinessViewProps> = ({
               filterType === 'expense' ? 'bg-rose-600 text-white shadow-sm' : 'text-slate-600 hover:text-rose-700'
             }`}
           >
-            Beban Operasional
+            Biaya Hobi
           </button>
         </div>
 
@@ -439,7 +439,7 @@ export const BusinessView: React.FC<BusinessViewProps> = ({
           <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"
-            placeholder="Cari invoice, pelanggan, catatan..."
+            placeholder="Cari invoice, pembeli, hobi, catatan..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full bg-amber-50/50 border border-slate-300 rounded-xl pl-8 pr-3 py-1.5 text-xs text-blue-950 placeholder-slate-400 focus:outline-none focus:border-orange-500"
@@ -454,22 +454,22 @@ export const BusinessView: React.FC<BusinessViewProps> = ({
           <div className="flex items-center gap-2">
             <Receipt className="w-4 h-4 text-orange-600" />
             <h2 className="text-sm font-extrabold text-blue-950">
-              Buku Jurnal Transaksi Usaha ({filteredTransactions.length} Mutasi)
+              Buku Mutasi Sampingan & Hobi ({filteredTransactions.length} Mutasi)
             </h2>
           </div>
           <span className="text-xs text-slate-500 font-medium">
-            Tersimpan di Cloud SQL (Database Terpisah Usaha)
+            Tersimpan di Cloud PostgreSQL (Pembukuan Terpisah)
           </span>
         </div>
 
         {loading ? (
           <div className="p-12 text-center text-xs text-slate-500 animate-pulse">
-            Memuat catatan transaksi usaha...
+            Memuat catatan transaksi sampingan & hobi...
           </div>
         ) : filteredTransactions.length === 0 ? (
           <div className="p-12 text-center text-slate-500">
-            <p className="text-sm font-semibold text-blue-950">Belum ada transaksi usaha yang dicatat pada filter ini.</p>
-            <p className="text-xs text-slate-500 mt-1">Gunakan tombol "+ Catat Omset" atau "+ Beban Usaha" di atas.</p>
+            <p className="text-sm font-semibold text-blue-950">Belum ada transaksi sampingan/hobi yang dicatat pada filter ini.</p>
+            <p className="text-xs text-slate-500 mt-1">Gunakan tombol "+ Pemasukan Sampingan" atau "+ Biaya Hobi / Beban" di atas.</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -478,8 +478,8 @@ export const BusinessView: React.FC<BusinessViewProps> = ({
                 <tr>
                   <th className="py-3 px-4">Tanggal</th>
                   <th className="py-3 px-4">Tipe & Kategori</th>
-                  <th className="py-3 px-4">Pelanggan / Klien / Vendor</th>
-                  <th className="py-3 px-4">No. Invoice / Nota</th>
+                  <th className="py-3 px-4">Pelanggan / Klien / Toko</th>
+                  <th className="py-3 px-4">No. Invoice / Resi</th>
                   <th className="py-3 px-4">Rekening / Kas</th>
                   <th className="py-3 px-4 text-right">Nominal (Rp)</th>
                   <th className="py-3 px-4">Catatan</th>
@@ -502,7 +502,7 @@ export const BusinessView: React.FC<BusinessViewProps> = ({
                             isIncome ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-rose-100 text-rose-800 border border-rose-300'
                           }`}>
                             {isIncome ? <ArrowDownLeft className="w-3 h-3 text-emerald-600" /> : <ArrowUpRight className="w-3 h-3 text-rose-600" />}
-                            {isIncome ? 'Omset' : 'Beban'}
+                            {isIncome ? 'Masuk' : 'Biaya Hobi'}
                           </span>
                           <span className="font-extrabold text-blue-950">{tx.category}</span>
                         </div>
@@ -514,7 +514,7 @@ export const BusinessView: React.FC<BusinessViewProps> = ({
                         {tx.invoiceNumber || '-'}
                       </td>
                       <td className="py-3 px-4 whitespace-nowrap text-slate-600 font-medium">
-                        {tx.wallet || 'Kas Usaha'}
+                        {tx.wallet || 'Kas Sampingan'}
                       </td>
                       <td className={`py-3 px-4 text-right whitespace-nowrap font-black ${
                         isIncome ? 'text-emerald-800' : 'text-rose-700'
@@ -551,16 +551,16 @@ export const BusinessView: React.FC<BusinessViewProps> = ({
         )}
       </div>
 
-      {/* Modal: Tambah / Ubah Transaksi Usaha */}
+      {/* Modal: Tambah / Ubah Transaksi Sampingan & Hobi */}
       {isTxModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-blue-950/60 backdrop-blur-sm animate-in fade-in overflow-y-auto">
           <div className="w-full max-w-md bg-white border border-amber-200/80 rounded-3xl p-6 shadow-2xl space-y-4 my-auto">
             <div className="flex items-center justify-between border-b border-amber-100 pb-3">
               <div>
                 <h3 className="text-base font-extrabold text-blue-950">
-                  {editingTx ? 'Ubah Catatan Usaha' : (txModalType === 'income' ? 'Catat Omset / Pemasukan Usaha' : 'Catat Beban Operasional Usaha')}
+                  {editingTx ? 'Ubah Catatan Sampingan/Hobi' : (txModalType === 'income' ? 'Catat Pemasukan Sampingan & Hobi' : 'Catat Pengeluaran / Biaya Hobi')}
                 </h3>
-                <p className="text-xs text-slate-600 font-medium">Keuangan Usaha Sampingan & Bisnis</p>
+                <p className="text-xs text-slate-600 font-medium">Keuangan Sampingan, Freelance & Hobi</p>
               </div>
               <button
                 onClick={() => setIsTxModalOpen(false)}
@@ -584,7 +584,7 @@ export const BusinessView: React.FC<BusinessViewProps> = ({
                       txModalType === 'income' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-600 hover:text-emerald-700'
                     }`}
                   >
-                    Pemasukan / Omset
+                    Pemasukan Sampingan
                   </button>
                   <button
                     type="button"
@@ -596,7 +596,7 @@ export const BusinessView: React.FC<BusinessViewProps> = ({
                       txModalType === 'expense' ? 'bg-rose-600 text-white shadow-sm' : 'text-slate-600 hover:text-rose-700'
                     }`}
                   >
-                    Beban Operasional
+                    Biaya & Belanja Hobi
                   </button>
                 </div>
               )}
@@ -626,7 +626,7 @@ export const BusinessView: React.FC<BusinessViewProps> = ({
               {/* Category */}
               <div>
                 <label className="block text-xs font-bold text-blue-950 mb-1">
-                  Kategori Usaha *
+                  Kategori Sampingan & Hobi *
                 </label>
                 <select
                   value={formCategory}
@@ -656,7 +656,7 @@ export const BusinessView: React.FC<BusinessViewProps> = ({
 
                 <div>
                   <label className="block text-xs font-bold text-blue-950 mb-1">
-                    Rekening / Kas Usaha
+                    Rekening / Kas Sampingan
                   </label>
                   <select
                     value={formWallet}
@@ -850,9 +850,9 @@ export const BusinessView: React.FC<BusinessViewProps> = ({
         isOpen={Boolean(deletingTx)}
         onClose={() => setDeletingTx(null)}
         onConfirm={confirmDeleteTx}
-        title="Hapus Transaksi Usaha"
+        title="Hapus Transaksi Sampingan / Hobi"
         itemName={deletingTx?.category}
-        itemDetail={deletingTx ? `${deletingTx.type === 'income' ? 'Omzet/Pendapatan' : 'Beban/Biaya'}: ${formatRupiah(deletingTx.amount)} (${deletingTx.wallet || 'Kas Usaha'})` : undefined}
+        itemDetail={deletingTx ? `${deletingTx.type === 'income' ? 'Pemasukan Sampingan' : 'Biaya Hobi'}: ${formatRupiah(deletingTx.amount)} (${deletingTx.wallet || 'Kas Sampingan'})` : undefined}
       />
 
     </div>

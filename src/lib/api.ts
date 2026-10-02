@@ -1249,36 +1249,61 @@ export class ApiClient {
       const btx = localCache.business.filter(t => t.date.startsWith(period));
 
       let rev = 0;
+      let exp = 0;
       let cogs = 0;
       let opex = 0;
       let prive = 0;
+      const categoryMap: Record<string, { total: number; count: number; type: string }> = {};
 
       btx.forEach(t => {
         const val = parseFloat(t.amount || '0');
         if (t.type === 'income') {
           rev += val;
         } else {
+          exp += val;
           const cat = t.category.toLowerCase();
-          if (cat.includes('hpp') || cat.includes('bahan')) cogs += val;
-          else if (cat.includes('prive') || cat.includes('gaji')) prive += val;
+          if (cat.includes('hpp') || cat.includes('bahan') || cat.includes('stok')) cogs += val;
+          else if (cat.includes('prive') || cat.includes('keluarga')) prive += val;
           else opex += val;
         }
+
+        if (!categoryMap[t.category]) {
+          categoryMap[t.category] = { total: 0, count: 0, type: t.type };
+        }
+        categoryMap[t.category].total += val;
+        categoryMap[t.category].count += 1;
       });
 
-      const gross = rev - cogs;
-      const net = gross - opex;
+      const net = rev - exp;
+      const margin = rev > 0 ? Math.round((net / rev) * 100) : 0;
+
+      const breakdowns = Object.entries(categoryMap).map(([category, d]) => ({
+        category,
+        type: d.type,
+        amount: d.total,
+        count: d.count,
+        percentage: d.type === 'income' 
+          ? (rev > 0 ? Math.round((d.total / rev) * 1000) / 10 : 0)
+          : (exp > 0 ? Math.round((d.total / exp) * 1000) / 10 : 0),
+      })).sort((a, b) => b.amount - a.amount);
 
       return {
         period,
+        totalRevenue: rev,
+        totalExpense: exp,
+        netProfit: net,
+        profitMargin: margin,
+        transactionCount: btx.length,
+        breakdowns,
+        recentTransactions: btx.slice(0, 10),
+        // backward compatibility fields
         revenue: rev,
         cogs,
-        grossProfit: gross,
+        grossProfit: rev - cogs,
         operatingExpenses: opex,
-        netProfit: net,
         priveTaken: prive,
         retainedEarnings: net - prive,
-        marginPercent: rev > 0 ? Math.round((net / rev) * 100) : 0,
-        transactionCount: btx.length,
+        marginPercent: margin,
       } as T;
     }
 

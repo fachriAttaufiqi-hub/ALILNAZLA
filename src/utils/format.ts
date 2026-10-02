@@ -84,31 +84,35 @@ export const WALLET_OPTIONS = [
 ];
 
 export const BUSINESS_INCOME_CATEGORIES = [
-  'Penjualan Produk / Dagang',
-  'Jasa Layanan / Freelance',
-  'Pendapatan Proyek',
-  'Pendapatan Komisi / Afiliasi',
-  'Penerimaan Piutang Usaha',
-  'Pendapatan Lain-lain Usaha',
+  'Jasa Layanan & Freelance',
+  'Karya, Seni & Kerajinan Hobi',
+  'Penjualan Produk & Jualan Online',
+  'Pendapatan Proyek & Desain',
+  'Konten Kreator & Kursus Hobi',
+  'Hasil Tanaman / Hewan Hobi',
+  'Komisi, Afiliasi & Hadiah Lomba',
+  'Penerimaan Piutang Sampingan',
+  'Pendapatan Lain-lain Sampingan/Hobi',
 ];
 
 export const BUSINESS_EXPENSE_CATEGORIES = [
-  'HPP / Pembelian Bahan Baku & Stok',
-  'Biaya Pengiriman & Logistik',
-  'Sewa Tempat & Utilitas Toko/Kantor',
-  'Pemasaran & Iklan Promosi',
-  'Gaji Karyawan / Asisten',
-  'Peralatan & Perlengkapan Kerja',
-  'Prive / Setor ke Rumah Tangga',
-  'Biaya Operasional Lainnya',
+  'Bahan Baku & Perlengkapan Hobi',
+  'Alat, Perkakas & Gadget Hobi',
+  'Stok Barang & Dagangan',
+  'Biaya Pengiriman, Kurir & Ongkir',
+  'Kursus, Workshop & Komunitas Hobi',
+  'Pemasaran & Iklan Medsos',
+  'Peralatan & Software Penunjang',
+  'Prive / Setor ke Kas Rumah Tangga',
+  'Biaya Operasional Sampingan Lainnya',
 ];
 
 export const BUSINESS_WALLET_OPTIONS = [
-  'Kas Usaha (Tunai)',
-  'Rekening Usaha (BCA)',
-  'Rekening Usaha (Mandiri)',
-  'Rekening Usaha (BRI/BNI)',
-  'QRIS / Merchant E-Wallet',
+  'Kas Sampingan & Hobi (Tunai)',
+  'Rekening Khusus (BCA)',
+  'Rekening Khusus (Mandiri)',
+  'Rekening Khusus (BRI/BNI)',
+  'QRIS / E-Wallet (GoPay/OVO/ShopeePay)',
   'Saldo Toko Online / Marketplace',
-  'Lainnya',
+  'Rekening Lainnya',
 ];

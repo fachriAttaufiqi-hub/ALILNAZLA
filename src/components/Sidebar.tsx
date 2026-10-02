@@ -37,7 +37,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'dashboard', label: 'Dashboard Ikhtisar', icon: LayoutDashboard },
     { id: 'transactions', label: 'Transaksi Rumah Tangga', icon: ArrowLeftRight },
     { id: 'debts', label: 'Buku Pembantu Hutang', icon: CreditCard, badge: 'Ledger' },
-    { id: 'business', label: 'Usaha Sampingan', icon: Briefcase, badge: 'Bisnis' },
+    { id: 'business', label: 'Sampingan & Hobi', icon: Sparkles, badge: 'Hobi' },
     { id: 'savings', label: 'Pos Tabungan', icon: PiggyBank },
     { id: 'reports', label: 'Laporan Bulanan', icon: FileText, badge: 'Otomatis' },
   ];
