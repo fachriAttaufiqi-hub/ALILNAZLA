@@ -22,6 +22,34 @@ async function startServer() {
     res.json({ status: 'ok', serverTime: new Date().toISOString() });
   });
 
+  // Shared Supabase Configuration for Multi-Device Household Sync
+  let sharedSupabaseUrl = cleanSupabaseUrl;
+  let sharedSupabaseKey = cleanSupabaseKey;
+
+  app.get('/api/sync/config', (req, res) => {
+    res.json({
+      url: sharedSupabaseUrl,
+      key: sharedSupabaseKey,
+      configured: Boolean(sharedSupabaseUrl && sharedSupabaseKey),
+    });
+  });
+
+  app.post('/api/sync/config', (req, res) => {
+    const { url, key } = req.body || {};
+    if (url && key) {
+      sharedSupabaseUrl = String(url).trim().replace(/\/rest\/v1\/?$/, '').replace(/\/+$/, '');
+      sharedSupabaseKey = String(key).trim();
+      saveSupabaseConfig(sharedSupabaseUrl, sharedSupabaseKey);
+      return res.json({ 
+        success: true, 
+        message: 'Kredensial database keluarga berhasil diselaraskan di server',
+        url: sharedSupabaseUrl, 
+        configured: true 
+      });
+    }
+    res.status(400).json({ error: 'URL dan Key Supabase wajib diisi' });
+  });
+
   // Database connection check (Supabase API Key / PostgreSQL / Cloud SQL)
   app.get('/api/database/status', async (req, res) => {
     // 1. Check Supabase API Key & URL first
@@ -157,16 +185,22 @@ async function startServer() {
     }
   });
 
+  // SHARED FAMILY HOUSEHOLD SCOPE (Pembukuan Bersama Suami - Istri)
+  const SHARED_FAMILY_UID = 'keluarga_utama';
+
   // --- USER PROFILE & BUDGET ---
   app.get('/api/user/profile', requireAuth, async (req: AuthRequest, res) => {
     try {
       const uid = req.user!.uid;
+      const familyUser = await db.select().from(users).where(eq(users.uid, SHARED_FAMILY_UID)).limit(1);
       const userList = await db.select().from(users).where(eq(users.uid, uid)).limit(1);
-      const user = userList[0] || {
+
+      const budget = familyUser[0]?.monthlyBudget || userList[0]?.monthlyBudget || '15000000';
+      const user = {
         uid,
-        email: req.user!.email || '',
-        displayName: req.user!.name || '',
-        monthlyBudget: '0',
+        email: req.user!.email || userList[0]?.email || 'keluarga@home.local',
+        displayName: req.user!.name || userList[0]?.displayName || 'Keluarga Fin',
+        monthlyBudget: budget,
       };
       res.json(user);
     } catch (error) {
@@ -181,9 +215,30 @@ async function startServer() {
       const { monthlyBudget } = req.body;
       const budgetValue = String(Math.max(0, parseFloat(monthlyBudget) || 0));
 
-      await db.update(users)
-        .set({ monthlyBudget: budgetValue })
-        .where(eq(users.uid, uid));
+      await db.insert(users)
+        .values({
+          uid: SHARED_FAMILY_UID,
+          email: 'keluarga@home.local',
+          displayName: 'Keluarga Utama',
+          monthlyBudget: budgetValue,
+        })
+        .onConflictDoUpdate({
+          target: users.uid,
+          set: { monthlyBudget: budgetValue },
+        });
+
+      if (uid !== SHARED_FAMILY_UID) {
+        await db.update(users)
+          .set({ monthlyBudget: budgetValue })
+          .where(eq(users.uid, uid));
+      }
+
+      syncToSupabase('users', {
+        uid: SHARED_FAMILY_UID,
+        email: req.user!.email || 'keluarga@home.local',
+        display_name: 'Keluarga Utama',
+        monthly_budget: budgetValue,
+      });
 
       res.json({ success: true, monthlyBudget: budgetValue });
     } catch (error) {
@@ -192,25 +247,23 @@ async function startServer() {
     }
   });
 
-  // --- DASHBOARD SUMMARY ---
+  // --- DASHBOARD SUMMARY (Shared Family Household: Suami & Istri) ---
   app.get('/api/dashboard/summary', requireAuth, async (req: AuthRequest, res) => {
     try {
-      const uid = req.user!.uid;
       const now = new Date();
       const currentPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
-      // Get user budget
-      const userList = await db.select().from(users).where(eq(users.uid, uid)).limit(1);
-      const budget = parseFloat(userList[0]?.monthlyBudget || '0');
+      // Get shared family budget
+      const familyUser = await db.select().from(users).where(eq(users.uid, SHARED_FAMILY_UID)).limit(1);
+      const budget = parseFloat(familyUser[0]?.monthlyBudget || '15000000');
 
-      // Get all transactions for current month
+      // Get all transactions for current month (all members)
       const startOfMonth = `${currentPeriod}-01`;
       const endOfMonth = `${currentPeriod}-31`;
 
       const monthTxList = await db.select().from(transactions)
         .where(
           and(
-            eq(transactions.userUid, uid),
             gte(transactions.date, startOfMonth),
             lte(transactions.date, endOfMonth)
           )
@@ -224,13 +277,13 @@ async function startServer() {
         else if (tx.type === 'expense') totalExpense += val;
       });
 
-      // Savings totals
-      const savingsList = await db.select().from(savings).where(eq(savings.userUid, uid));
+      // Savings totals (all family savings)
+      const savingsList = await db.select().from(savings);
       const totalSavingsAccumulated = savingsList.reduce((acc, s) => acc + parseFloat(s.currentAmount), 0);
       const totalSavingsTarget = savingsList.reduce((acc, s) => acc + parseFloat(s.targetAmount), 0);
 
-      // Debts totals
-      const debtsList = await db.select().from(debts).where(eq(debts.userUid, uid));
+      // Debts totals (all family debts)
+      const debtsList = await db.select().from(debts);
       let totalDebtRemaining = 0;
       let totalReceivableRemaining = 0;
       debtsList.forEach(d => {
@@ -241,9 +294,8 @@ async function startServer() {
         }
       });
 
-      // Recent 5 transactions
+      // Recent 5 transactions (shared family)
       const recentTransactions = await db.select().from(transactions)
-        .where(eq(transactions.userUid, uid))
         .orderBy(desc(transactions.date), desc(transactions.id))
         .limit(5);
 
@@ -266,13 +318,13 @@ async function startServer() {
     }
   });
 
-  // --- TRANSACTIONS CRUD ---
+  // --- TRANSACTIONS CRUD (Shared Family Household: Suami & Istri) ---
   app.get('/api/transactions', requireAuth, async (req: AuthRequest, res) => {
     try {
-      const uid = req.user!.uid;
       const { period, type, category, limit } = req.query;
 
-      const conditions = [eq(transactions.userUid, uid)];
+      // Ambil seluruh transaksi keluarga
+      const conditions: any[] = [];
 
       if (period && typeof period === 'string') {
         conditions.push(gte(transactions.date, `${period}-01`));
@@ -287,10 +339,10 @@ async function startServer() {
         conditions.push(eq(transactions.category, category));
       }
 
-      const queryLimit = limit ? parseInt(limit as string, 10) : 200;
+      const queryLimit = limit ? parseInt(limit as string, 10) : 300;
 
       const list = await db.select().from(transactions)
-        .where(and(...conditions))
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
         .orderBy(desc(transactions.date), desc(transactions.id))
         .limit(queryLimit);
 
@@ -303,7 +355,6 @@ async function startServer() {
 
   app.post('/api/transactions', requireAuth, async (req: AuthRequest, res) => {
     try {
-      const uid = req.user!.uid;
       const { type, category, amount, date, wallet, notes } = req.body;
 
       if (!type || !category || !amount || !date) {
@@ -317,7 +368,7 @@ async function startServer() {
 
       const inserted = await db.insert(transactions)
         .values({
-          userUid: uid,
+          userUid: SHARED_FAMILY_UID,
           type,
           category,
           amount: String(numAmount),
@@ -328,7 +379,7 @@ async function startServer() {
         .returning();
 
       syncToSupabase('transactions', {
-        user_uid: uid,
+        user_uid: SHARED_FAMILY_UID,
         type,
         category,
         amount: String(numAmount),
@@ -346,7 +397,6 @@ async function startServer() {
 
   app.put('/api/transactions/:id', requireAuth, async (req: AuthRequest, res) => {
     try {
-      const uid = req.user!.uid;
       const txId = parseInt(req.params.id, 10);
       const { type, category, amount, date, wallet, notes } = req.body;
 
@@ -362,9 +412,9 @@ async function startServer() {
           amount: String(numAmount),
           date,
           wallet: wallet || 'Tunai',
-          notes: notes || '',
+          notes: notes !== undefined ? notes : undefined,
         })
-        .where(and(eq(transactions.id, txId), eq(transactions.userUid, uid)))
+        .where(eq(transactions.id, txId))
         .returning();
 
       if (!updated.length) {
@@ -380,11 +430,10 @@ async function startServer() {
 
   app.delete('/api/transactions/:id', requireAuth, async (req: AuthRequest, res) => {
     try {
-      const uid = req.user!.uid;
       const txId = parseInt(req.params.id, 10);
 
       const deleted = await db.delete(transactions)
-        .where(and(eq(transactions.id, txId), eq(transactions.userUid, uid)))
+        .where(eq(transactions.id, txId))
         .returning();
 
       if (!deleted.length) {
@@ -396,14 +445,10 @@ async function startServer() {
       console.error('Error deleting transaction:', error);
       res.status(500).json({ error: 'Gagal menghapus transaksi' });
     }
-  });
-
-  // --- DEBTS & RECEIVABLES CRUD ---
+  // --- DEBTS & RECEIVABLES CRUD (Shared Family Household) ---
   app.get('/api/debts', requireAuth, async (req: AuthRequest, res) => {
     try {
-      const uid = req.user!.uid;
       const list = await db.select().from(debts)
-        .where(eq(debts.userUid, uid))
         .orderBy(desc(debts.createdAt));
 
       res.json(list);
@@ -415,7 +460,6 @@ async function startServer() {
 
   app.post('/api/debts', requireAuth, async (req: AuthRequest, res) => {
     try {
-      const uid = req.user!.uid;
       const { type, person, totalAmount, paidAmount, dueDate, notes } = req.body;
 
       if (!type || !person || !totalAmount) {
@@ -428,7 +472,7 @@ async function startServer() {
 
       const inserted = await db.insert(debts)
         .values({
-          userUid: uid,
+          userUid: SHARED_FAMILY_UID,
           type,
           person,
           totalAmount: String(totalNum),
@@ -440,7 +484,7 @@ async function startServer() {
         .returning();
 
       syncToSupabase('debts', {
-        user_uid: uid,
+        user_uid: SHARED_FAMILY_UID,
         type,
         person,
         total_amount: String(totalNum),
@@ -455,7 +499,7 @@ async function startServer() {
         const remainingInit = Math.max(0, totalNum - paidNum);
         await db.insert(debtLedgerEntries).values({
           debtId: inserted[0].id,
-          userUid: uid,
+          userUid: SHARED_FAMILY_UID,
           date: new Date().toISOString().split('T')[0],
           type: 'initial',
           amount: String(totalNum),
@@ -467,7 +511,7 @@ async function startServer() {
         if (paidNum > 0) {
           await db.insert(debtLedgerEntries).values({
             debtId: inserted[0].id,
-            userUid: uid,
+            userUid: SHARED_FAMILY_UID,
             date: new Date().toISOString().split('T')[0],
             type: 'installment_payment',
             amount: String(paidNum),
@@ -490,12 +534,10 @@ async function startServer() {
   // --- BUKU PEMBANTU HUTANG & PIUTANG (SUBSIDIARY LEDGER) ---
   app.get('/api/debts/:id/ledger', requireAuth, async (req: AuthRequest, res) => {
     try {
-      const uid = req.user!.uid;
       const debtId = parseInt(req.params.id, 10);
 
-      // Verify debt belongs to user
       const debtCheck = await db.select().from(debts)
-        .where(and(eq(debts.id, debtId), eq(debts.userUid, uid)))
+        .where(eq(debts.id, debtId))
         .limit(1);
 
       if (!debtCheck.length) {
@@ -503,7 +545,7 @@ async function startServer() {
       }
 
       const entries = await db.select().from(debtLedgerEntries)
-        .where(and(eq(debtLedgerEntries.debtId, debtId), eq(debtLedgerEntries.userUid, uid)))
+        .where(eq(debtLedgerEntries.debtId, debtId))
         .orderBy(asc(debtLedgerEntries.date), asc(debtLedgerEntries.id));
 
       res.json({
@@ -518,7 +560,6 @@ async function startServer() {
 
   app.post('/api/debts/:id/ledger', requireAuth, async (req: AuthRequest, res) => {
     try {
-      const uid = req.user!.uid;
       const debtId = parseInt(req.params.id, 10);
       const { date, type, amount, wallet, notes, recordTransaction } = req.body;
 
@@ -528,7 +569,7 @@ async function startServer() {
       }
 
       const debtCheck = await db.select().from(debts)
-        .where(and(eq(debts.id, debtId), eq(debts.userUid, uid)))
+        .where(eq(debts.id, debtId))
         .limit(1);
 
       if (!debtCheck.length) {
@@ -540,10 +581,8 @@ async function startServer() {
       let newPaid = parseFloat(current.paidAmount);
 
       if (type === 'borrow_addition') {
-        // Penambahan pokok hutang/piutang
         newTotal += numAmount;
       } else {
-        // Pembayaran / cicilan
         newPaid += numAmount;
       }
 
@@ -561,7 +600,7 @@ async function startServer() {
 
       const entry = await db.insert(debtLedgerEntries).values({
         debtId,
-        userUid: uid,
+        userUid: SHARED_FAMILY_UID,
         date: date || new Date().toISOString().split('T')[0],
         type: type || 'installment_payment',
         amount: String(numAmount),
@@ -584,7 +623,7 @@ async function startServer() {
         }
 
         await db.insert(transactions).values({
-          userUid: uid,
+          userUid: SHARED_FAMILY_UID,
           type: txType,
           category: txCat,
           amount: String(numAmount),
@@ -603,7 +642,6 @@ async function startServer() {
 
   app.put('/api/debts/:id', requireAuth, async (req: AuthRequest, res) => {
     try {
-      const uid = req.user!.uid;
       const debtId = parseInt(req.params.id, 10);
       const { type, person, totalAmount, paidAmount, dueDate, status, notes } = req.body;
 
@@ -622,7 +660,7 @@ async function startServer() {
           notes: notes || '',
           updatedAt: new Date(),
         })
-        .where(and(eq(debts.id, debtId), eq(debts.userUid, uid)))
+        .where(eq(debts.id, debtId))
         .returning();
 
       if (!updated.length) {
@@ -636,10 +674,9 @@ async function startServer() {
     }
   });
 
-  // Record payment for debt or receivable
+  // Record payment for debt or receivable (Shared Family)
   app.post('/api/debts/:id/pay', requireAuth, async (req: AuthRequest, res) => {
     try {
-      const uid = req.user!.uid;
       const debtId = parseInt(req.params.id, 10);
       const { paymentAmount, date, wallet, recordTransaction, notes } = req.body;
 
@@ -649,7 +686,7 @@ async function startServer() {
       }
 
       const existingList = await db.select().from(debts)
-        .where(and(eq(debts.id, debtId), eq(debts.userUid, uid)))
+        .where(eq(debts.id, debtId))
         .limit(1);
 
       if (!existingList.length) {
@@ -674,7 +711,7 @@ async function startServer() {
         const remainingAfter = Math.max(0, parseFloat(current.totalAmount) - newPaid);
         await db.insert(debtLedgerEntries).values({
           debtId: current.id,
-          userUid: uid,
+          userUid: SHARED_FAMILY_UID,
           date: date || new Date().toISOString().split('T')[0],
           type: 'installment_payment',
           amount: String(payVal),
@@ -691,9 +728,9 @@ async function startServer() {
         const txType = current.type === 'debt' ? 'expense' : 'income';
         const txCategory = current.type === 'debt' ? 'Pembayaran Hutang' : 'Penerimaan Piutang';
         await db.insert(transactions).values({
-          userUid: uid,
+          userUid: SHARED_FAMILY_UID,
           type: txType,
-          category: txCategory,
+          category: txCat,
           amount: String(payVal),
           date: date || new Date().toISOString().split('T')[0],
           wallet: wallet || 'Tunai',
@@ -708,13 +745,12 @@ async function startServer() {
     }
   });
 
-  // --- USAHA SAMPINGAN (SEPARATE BUSINESS LEDGER & P&L) ---
+  // --- USAHA SAMPINGAN & HOBI (Shared Family Household) ---
   app.get('/api/business/transactions', requireAuth, async (req: AuthRequest, res) => {
     try {
-      const uid = req.user!.uid;
       const { period, type, category } = req.query;
 
-      const conditions = [eq(businessTransactions.userUid, uid)];
+      const conditions: any[] = [];
 
       if (period && typeof period === 'string') {
         conditions.push(gte(businessTransactions.date, `${period}-01`));
@@ -730,7 +766,7 @@ async function startServer() {
       }
 
       const list = await db.select().from(businessTransactions)
-        .where(and(...conditions))
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
         .orderBy(desc(businessTransactions.date), desc(businessTransactions.id));
 
       res.json(list);
@@ -742,7 +778,6 @@ async function startServer() {
 
   app.post('/api/business/transactions', requireAuth, async (req: AuthRequest, res) => {
     try {
-      const uid = req.user!.uid;
       const { type, category, amount, date, wallet, customerOrVendor, invoiceNumber, notes } = req.body;
 
       if (!type || !category || !amount || !date) {
@@ -755,7 +790,7 @@ async function startServer() {
       }
 
       const inserted = await db.insert(businessTransactions).values({
-        userUid: uid,
+        userUid: SHARED_FAMILY_UID,
         type,
         category,
         amount: String(numAmount),
@@ -767,7 +802,7 @@ async function startServer() {
       }).returning();
 
       syncToSupabase('business_transactions', {
-        user_uid: uid,
+        user_uid: SHARED_FAMILY_UID,
         type,
         category,
         amount: String(numAmount),
@@ -787,7 +822,6 @@ async function startServer() {
 
   app.put('/api/business/transactions/:id', requireAuth, async (req: AuthRequest, res) => {
     try {
-      const uid = req.user!.uid;
       const txId = parseInt(req.params.id, 10);
       const { type, category, amount, date, wallet, customerOrVendor, invoiceNumber, notes } = req.body;
 
@@ -807,7 +841,7 @@ async function startServer() {
           invoiceNumber: invoiceNumber || '',
           notes: notes || '',
         })
-        .where(and(eq(businessTransactions.id, txId), eq(businessTransactions.userUid, uid)))
+        .where(eq(businessTransactions.id, txId))
         .returning();
 
       if (!updated.length) {
@@ -823,11 +857,10 @@ async function startServer() {
 
   app.delete('/api/business/transactions/:id', requireAuth, async (req: AuthRequest, res) => {
     try {
-      const uid = req.user!.uid;
       const txId = parseInt(req.params.id, 10);
 
       const deleted = await db.delete(businessTransactions)
-        .where(and(eq(businessTransactions.id, txId), eq(businessTransactions.userUid, uid)))
+        .where(eq(businessTransactions.id, txId))
         .returning();
 
       if (!deleted.length) {
@@ -843,7 +876,6 @@ async function startServer() {
 
   app.get('/api/business/summary', requireAuth, async (req: AuthRequest, res) => {
     try {
-      const uid = req.user!.uid;
       const period = typeof req.query.period === 'string' && req.query.period 
         ? req.query.period 
         : `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
@@ -851,7 +883,6 @@ async function startServer() {
       const txList = await db.select().from(businessTransactions)
         .where(
           and(
-            eq(businessTransactions.userUid, uid),
             gte(businessTransactions.date, `${period}-01`),
             lte(businessTransactions.date, `${period}-31`)
           )
@@ -909,7 +940,6 @@ async function startServer() {
   // Transfer profit from business to household wallet (Prive)
   app.post('/api/business/transfer-prive', requireAuth, async (req: AuthRequest, res) => {
     try {
-      const uid = req.user!.uid;
       const { amount, date, businessWallet, householdWallet, notes } = req.body;
 
       const numAmount = parseFloat(amount);
@@ -919,9 +949,9 @@ async function startServer() {
 
       const txDate = date || new Date().toISOString().split('T')[0];
 
-      // 1. Record in business transactions as Prive / Penarikan Pemilik (Expense in business)
+      // 1. Record in business transactions as Prive (Expense in business)
       await db.insert(businessTransactions).values({
-        userUid: uid,
+        userUid: SHARED_FAMILY_UID,
         type: 'expense',
         category: 'Prive / Setor ke Rumah Tangga',
         amount: String(numAmount),
@@ -930,9 +960,9 @@ async function startServer() {
         notes: notes || 'Penyaluran laba usaha ke keuangan keluarga',
       });
 
-      // 2. Record in household transactions as Income (Pemasukan Rumah Tangga dari Usaha Sampingan)
+      // 2. Record in household transactions as Income
       await db.insert(transactions).values({
-        userUid: uid,
+        userUid: SHARED_FAMILY_UID,
         type: 'income',
         category: 'Usaha Sampingan',
         amount: String(numAmount),
@@ -950,11 +980,10 @@ async function startServer() {
 
   app.delete('/api/debts/:id', requireAuth, async (req: AuthRequest, res) => {
     try {
-      const uid = req.user!.uid;
       const debtId = parseInt(req.params.id, 10);
 
       const deleted = await db.delete(debts)
-        .where(and(eq(debts.id, debtId), eq(debts.userUid, uid)))
+        .where(eq(debts.id, debtId))
         .returning();
 
       if (!deleted.length) {
@@ -963,6 +992,10 @@ async function startServer() {
 
       res.json({ success: true, message: 'Data berhasil dihapus' });
     } catch (error) {
+      console.error('Error deleting debt:', error);
+      res.status(500).json({ error: 'Gagal menghapus data hutang/piutang' });
+    }
+  });
       console.error('Error deleting debt:', error);
       res.status(500).json({ error: 'Gagal menghapus data hutang/piutang' });
     }

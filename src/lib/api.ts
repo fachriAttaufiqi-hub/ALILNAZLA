@@ -22,7 +22,17 @@ const STORAGE_KEYS = {
   SAVINGS: 'keluargafin_savings',
   BUSINESS: 'keluargafin_business_transactions',
   REPORTS: 'keluargafin_monthly_reports',
+  PENDING_SYNC: 'keluargafin_pending_sync_queue',
 };
+
+// Pending sync item definition for resilient two-way device sync
+export interface PendingSyncItem {
+  id: string;
+  table: string;
+  action: 'insert' | 'update' | 'delete';
+  data: any;
+  timestamp: number;
+}
 
 // Safe LocalStorage helpers
 const loadFromStorage = <T>(key: string, fallback: T): T => {
@@ -42,6 +52,69 @@ const saveToStorage = (key: string, data: any) => {
   } catch (e) {
     console.warn('LocalStorage save failed:', e);
   }
+};
+
+// Pending queue helpers
+export const getPendingQueue = (): PendingSyncItem[] => {
+  return loadFromStorage<PendingSyncItem[]>(STORAGE_KEYS.PENDING_SYNC, []);
+};
+
+export const addToPendingQueue = (table: string, action: 'insert' | 'update' | 'delete', data: any) => {
+  const queue = getPendingQueue();
+  queue.push({
+    id: `${table}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    table,
+    action,
+    data,
+    timestamp: Date.now(),
+  });
+  saveToStorage(STORAGE_KEYS.PENDING_SYNC, queue);
+};
+
+export const removeFromPendingQueue = (id: string) => {
+  const queue = getPendingQueue().filter(item => item.id !== id);
+  saveToStorage(STORAGE_KEYS.PENDING_SYNC, queue);
+};
+
+// Automatic retry flusher for pending offline/failed sync queue
+export const syncPendingQueue = async (): Promise<{ synced: number; remaining: number }> => {
+  if (!supabase) return { synced: 0, remaining: getPendingQueue().length };
+  const queue = getPendingQueue();
+  if (queue.length === 0) return { synced: 0, remaining: 0 };
+
+  let syncedCount = 0;
+  for (const item of [...queue]) {
+    try {
+      if (item.action === 'insert') {
+        const { error } = await supabase.from(item.table).insert([item.data]);
+        if (!error) {
+          removeFromPendingQueue(item.id);
+          syncedCount++;
+        }
+      } else if (item.action === 'update') {
+        const { id, ...rest } = item.data;
+        if (id) {
+          const { error } = await supabase.from(item.table).update(rest).eq('id', id);
+          if (!error) {
+            removeFromPendingQueue(item.id);
+            syncedCount++;
+          }
+        }
+      } else if (item.action === 'delete') {
+        if (item.data?.id) {
+          const { error } = await supabase.from(item.table).delete().eq('id', item.data.id);
+          if (!error) {
+            removeFromPendingQueue(item.id);
+            syncedCount++;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn(`Sync pending queue item failed for ${item.table}:`, e);
+    }
+  }
+
+  return { synced: syncedCount, remaining: getPendingQueue().length };
 };
 
 // Seed initial demo data for new users
@@ -390,7 +463,7 @@ export class ApiClient {
               .order('date', { ascending: false });
 
             if (!error && data !== null) {
-              localCache.transactions = data.map((row: any) => ({
+              const cloudTxs = data.map((row: any) => ({
                 id: row.id,
                 userUid: row.user_uid || 'keluarga_utama',
                 type: row.type,
@@ -401,6 +474,18 @@ export class ApiClient {
                 notes: row.notes || '',
                 createdAt: row.created_at,
               }));
+
+              // Preserve any locally created items that haven't reached cloud yet (temporary timestamp IDs)
+              const seenMap = new Map<number, Transaction>();
+              cloudTxs.forEach((t: Transaction) => seenMap.set(t.id, t));
+
+              localCache.transactions.forEach((t: Transaction) => {
+                if (t.id > 100000000000 && !seenMap.has(t.id)) {
+                  seenMap.set(t.id, t);
+                }
+              });
+
+              localCache.transactions = Array.from(seenMap.values());
               saveToStorage(STORAGE_KEYS.TRANSACTIONS, localCache.transactions);
             }
           } catch (e: any) {
@@ -429,25 +514,35 @@ export class ApiClient {
           notes: body.notes || '',
         };
 
+        const dbPayload = {
+          user_uid: 'keluarga_utama',
+          type: newTx.type,
+          category: newTx.category,
+          amount: newTx.amount,
+          date: newTx.date,
+          wallet: newTx.wallet,
+          notes: newTx.notes,
+        };
+
+        let savedToCloud = false;
         if (supabase) {
           try {
-            const { data, error } = await supabase.from('transactions').insert([{
-              user_uid: 'keluarga_utama',
-              type: newTx.type,
-              category: newTx.category,
-              amount: newTx.amount,
-              date: newTx.date,
-              wallet: newTx.wallet,
-              notes: newTx.notes,
-            }]).select().single();
+            const { data, error } = await supabase.from('transactions').insert([dbPayload]).select();
 
-            if (!error && data) {
-              newTx.id = data.id;
-              newTx.createdAt = data.created_at;
+            if (!error && data && data.length > 0) {
+              newTx.id = data[0].id;
+              newTx.createdAt = data[0].created_at;
+              savedToCloud = true;
+            } else if (error) {
+              console.warn('Supabase direct insert transaction:', error.message);
             }
           } catch (e: any) {
-            console.warn('Supabase direct insert transaction:', e?.message);
+            console.warn('Supabase direct insert transaction catch:', e?.message);
           }
+        }
+
+        if (!savedToCloud) {
+          addToPendingQueue('transactions', 'insert', dbPayload);
         }
 
         localCache.transactions.unshift(newTx);
@@ -460,19 +555,28 @@ export class ApiClient {
       const id = parseInt(pathname.split('/').pop() || '0', 10);
       const body = JSON.parse(options.body as string);
 
+      const updatePayload = {
+        type: body.type,
+        category: body.category,
+        amount: body.amount !== undefined ? String(body.amount) : undefined,
+        date: body.date,
+        wallet: body.wallet,
+        notes: body.notes,
+      };
+
+      let updatedInCloud = false;
       if (supabase) {
         try {
-          await supabase.from('transactions').update({
-            type: body.type,
-            category: body.category,
-            amount: body.amount !== undefined ? String(body.amount) : undefined,
-            date: body.date,
-            wallet: body.wallet,
-            notes: body.notes,
-          }).eq('id', id);
+          const { error } = await supabase.from('transactions').update(updatePayload).eq('id', id);
+          if (!error) updatedInCloud = true;
+          else console.warn('Supabase update transaction error:', error.message);
         } catch (e: any) {
-          console.warn('Supabase update transaction:', e?.message);
+          console.warn('Supabase update transaction catch:', e?.message);
         }
+      }
+
+      if (!updatedInCloud && id < 100000000000) {
+        addToPendingQueue('transactions', 'update', { id, ...updatePayload });
       }
 
       const idx = localCache.transactions.findIndex(t => t.id === id);
@@ -486,12 +590,19 @@ export class ApiClient {
     if (pathname.startsWith('/api/transactions/') && method === 'DELETE') {
       const id = parseInt(pathname.split('/').pop() || '0', 10);
 
+      let deletedInCloud = false;
       if (supabase) {
         try {
-          await supabase.from('transactions').delete().eq('id', id);
+          const { error } = await supabase.from('transactions').delete().eq('id', id);
+          if (!error) deletedInCloud = true;
+          else console.warn('Supabase delete transaction error:', error.message);
         } catch (e: any) {
-          console.warn('Supabase delete transaction:', e?.message);
+          console.warn('Supabase delete transaction catch:', e?.message);
         }
+      }
+
+      if (!deletedInCloud && id < 100000000000) {
+        addToPendingQueue('transactions', 'delete', { id });
       }
 
       localCache.transactions = localCache.transactions.filter(t => t.id !== id);
@@ -506,7 +617,7 @@ export class ApiClient {
           try {
             const { data, error } = await supabase.from('debts').select('*').order('id', { ascending: false });
             if (!error && data !== null) {
-              localCache.debts = data.map((row: any) => ({
+              const cloudDebts = data.map((row: any) => ({
                 id: row.id,
                 userUid: row.user_uid || 'keluarga_utama',
                 type: row.type,
@@ -519,6 +630,16 @@ export class ApiClient {
                 createdAt: row.created_at,
                 updatedAt: row.updated_at,
               }));
+
+              const seenMap = new Map<number, Debt>();
+              cloudDebts.forEach((d: Debt) => seenMap.set(d.id, d));
+              localCache.debts.forEach((d: Debt) => {
+                if (d.id > 100000000000 && !seenMap.has(d.id)) {
+                  seenMap.set(d.id, d);
+                }
+              });
+
+              localCache.debts = Array.from(seenMap.values());
               saveToStorage(STORAGE_KEYS.DEBTS, localCache.debts);
             }
           } catch (e: any) {
@@ -542,27 +663,37 @@ export class ApiClient {
           notes: body.notes || '',
         };
 
+        const dbDebtPayload = {
+          user_uid: 'keluarga_utama',
+          type: newDebt.type,
+          person: newDebt.person,
+          total_amount: newDebt.totalAmount,
+          paid_amount: newDebt.paidAmount,
+          due_date: newDebt.dueDate,
+          status: newDebt.status,
+          notes: newDebt.notes,
+        };
+
+        let savedToCloud = false;
         if (supabase) {
           try {
-            const { data, error } = await supabase.from('debts').insert([{
-              user_uid: 'keluarga_utama',
-              type: newDebt.type,
-              person: newDebt.person,
-              total_amount: newDebt.totalAmount,
-              paid_amount: newDebt.paidAmount,
-              due_date: newDebt.dueDate,
-              status: newDebt.status,
-              notes: newDebt.notes,
-            }]).select().single();
+            const { data, error } = await supabase.from('debts').insert([dbDebtPayload]).select();
 
-            if (!error && data) {
-              newDebt.id = data.id;
-              newDebt.createdAt = data.created_at;
-              newDebt.updatedAt = data.updated_at;
+            if (!error && data && data.length > 0) {
+              newDebt.id = data[0].id;
+              newDebt.createdAt = data[0].created_at;
+              newDebt.updatedAt = data[0].updated_at;
+              savedToCloud = true;
+            } else if (error) {
+              console.warn('Supabase insert debt error:', error.message);
             }
           } catch (e: any) {
-            console.warn('Supabase insert debt error:', e?.message);
+            console.warn('Supabase insert debt catch:', e?.message);
           }
+        }
+
+        if (!savedToCloud) {
+          addToPendingQueue('debts', 'insert', dbDebtPayload);
         }
 
         localCache.debts.unshift(newDebt);
@@ -582,21 +713,33 @@ export class ApiClient {
           notes: body.notes || `Pembukaan Buku Pembantu ${newDebt.type === 'debt' ? 'Hutang' : 'Piutang'} untuk ${newDebt.person}`,
         };
 
+        const dbLedgerPayload = {
+          debt_id: newDebt.id,
+          user_uid: 'keluarga_utama',
+          date: initEntry.date,
+          type: initEntry.type,
+          amount: initEntry.amount,
+          balance_after: initEntry.balanceAfter,
+          wallet: initEntry.wallet,
+          notes: initEntry.notes,
+        };
+
+        let ledgerSavedToCloud = false;
         if (supabase) {
           try {
-            await supabase.from('debt_ledger_entries').insert([{
-              debt_id: newDebt.id,
-              user_uid: 'keluarga_utama',
-              date: initEntry.date,
-              type: initEntry.type,
-              amount: initEntry.amount,
-              balance_after: initEntry.balanceAfter,
-              wallet: initEntry.wallet,
-              notes: initEntry.notes,
-            }]);
+            const { data, error } = await supabase.from('debt_ledger_entries').insert([dbLedgerPayload]).select();
+            if (!error && data && data.length > 0) {
+              initEntry.id = data[0].id;
+              initEntry.createdAt = data[0].created_at;
+              ledgerSavedToCloud = true;
+            }
           } catch (e: any) {
             console.warn('Supabase insert initial ledger error:', e?.message);
           }
+        }
+
+        if (!ledgerSavedToCloud) {
+          addToPendingQueue('debt_ledger_entries', 'insert', dbLedgerPayload);
         }
 
         localCache.debtLedger.push(initEntry);
@@ -913,7 +1056,7 @@ export class ApiClient {
           try {
             const { data, error } = await supabase.from('savings').select('*').order('id', { ascending: false });
             if (!error && data !== null) {
-              localCache.savings = data.map((row: any) => ({
+              const cloudSavings = data.map((row: any) => ({
                 id: row.id,
                 userUid: row.user_uid || 'keluarga_utama',
                 name: row.name,
@@ -926,6 +1069,16 @@ export class ApiClient {
                 createdAt: row.created_at,
                 updatedAt: row.updated_at,
               }));
+
+              const seenMap = new Map<number, Saving>();
+              cloudSavings.forEach((s: Saving) => seenMap.set(s.id, s));
+              localCache.savings.forEach((s: Saving) => {
+                if (s.id > 100000000000 && !seenMap.has(s.id)) {
+                  seenMap.set(s.id, s);
+                }
+              });
+
+              localCache.savings = Array.from(seenMap.values());
               saveToStorage(STORAGE_KEYS.SAVINGS, localCache.savings);
             }
           } catch (e: any) {
@@ -949,27 +1102,37 @@ export class ApiClient {
           notes: body.notes || '',
         };
 
+        const dbSavingPayload = {
+          user_uid: 'keluarga_utama',
+          name: newS.name,
+          target_amount: newS.targetAmount,
+          current_amount: newS.currentAmount,
+          target_date: newS.targetDate,
+          category: newS.category,
+          color: newS.color,
+          notes: newS.notes,
+        };
+
+        let savedToCloud = false;
         if (supabase) {
           try {
-            const { data, error } = await supabase.from('savings').insert([{
-              user_uid: 'keluarga_utama',
-              name: newS.name,
-              target_amount: newS.targetAmount,
-              current_amount: newS.currentAmount,
-              target_date: newS.targetDate,
-              category: newS.category,
-              color: newS.color,
-              notes: newS.notes,
-            }]).select().single();
+            const { data, error } = await supabase.from('savings').insert([dbSavingPayload]).select();
 
-            if (!error && data) {
-              newS.id = data.id;
-              newS.createdAt = data.created_at;
-              newS.updatedAt = data.updated_at;
+            if (!error && data && data.length > 0) {
+              newS.id = data[0].id;
+              newS.createdAt = data[0].created_at;
+              newS.updatedAt = data[0].updated_at;
+              savedToCloud = true;
+            } else if (error) {
+              console.warn('Supabase insert saving error:', error.message);
             }
           } catch (e: any) {
-            console.warn('Supabase insert saving error:', e?.message);
+            console.warn('Supabase insert saving catch:', e?.message);
           }
+        }
+
+        if (!savedToCloud) {
+          addToPendingQueue('savings', 'insert', dbSavingPayload);
         }
 
         localCache.savings.unshift(newS);
@@ -1085,7 +1248,7 @@ export class ApiClient {
           try {
             const { data, error } = await supabase.from('business_transactions').select('*').order('date', { ascending: false });
             if (!error && data !== null) {
-              localCache.business = data.map((row: any) => ({
+              const cloudBiz = data.map((row: any) => ({
                 id: row.id,
                 userUid: row.user_uid || 'keluarga_utama',
                 type: row.type,
@@ -1098,6 +1261,16 @@ export class ApiClient {
                 notes: row.notes || '',
                 createdAt: row.created_at,
               }));
+
+              const seenMap = new Map<number, BusinessTransaction>();
+              cloudBiz.forEach((b: BusinessTransaction) => seenMap.set(b.id, b));
+              localCache.business.forEach((b: BusinessTransaction) => {
+                if (b.id > 100000000000 && !seenMap.has(b.id)) {
+                  seenMap.set(b.id, b);
+                }
+              });
+
+              localCache.business = Array.from(seenMap.values());
               saveToStorage(STORAGE_KEYS.BUSINESS, localCache.business);
             }
           } catch (e: any) {
@@ -1126,27 +1299,37 @@ export class ApiClient {
           notes: body.notes || '',
         };
 
+        const dbBizPayload = {
+          user_uid: 'keluarga_utama',
+          type: newBiz.type,
+          category: newBiz.category,
+          amount: newBiz.amount,
+          date: newBiz.date,
+          wallet: newBiz.wallet,
+          customer_or_vendor: newBiz.customerOrVendor,
+          invoice_number: newBiz.invoiceNumber,
+          notes: newBiz.notes,
+        };
+
+        let savedToCloud = false;
         if (supabase) {
           try {
-            const { data, error } = await supabase.from('business_transactions').insert([{
-              user_uid: 'keluarga_utama',
-              type: newBiz.type,
-              category: newBiz.category,
-              amount: newBiz.amount,
-              date: newBiz.date,
-              wallet: newBiz.wallet,
-              customer_or_vendor: newBiz.customerOrVendor,
-              invoice_number: newBiz.invoiceNumber,
-              notes: newBiz.notes,
-            }]).select().single();
+            const { data, error } = await supabase.from('business_transactions').insert([dbBizPayload]).select();
 
-            if (!error && data) {
-              newBiz.id = data.id;
-              newBiz.createdAt = data.created_at;
+            if (!error && data && data.length > 0) {
+              newBiz.id = data[0].id;
+              newBiz.createdAt = data[0].created_at;
+              savedToCloud = true;
+            } else if (error) {
+              console.warn('Supabase insert business error:', error.message);
             }
           } catch (e: any) {
-            console.warn('Supabase insert business error:', e?.message);
+            console.warn('Supabase insert business catch:', e?.message);
           }
+        }
+
+        if (!savedToCloud) {
+          addToPendingQueue('business_transactions', 'insert', dbBizPayload);
         }
 
         localCache.business.unshift(newBiz);
@@ -1268,7 +1451,40 @@ export class ApiClient {
       const amt = parseFloat(body.amount);
       const curDate = body.date || new Date().toISOString().slice(0, 10);
 
-      // Business expense
+      const bizPayload = {
+        user_uid: 'keluarga_utama',
+        type: 'expense',
+        category: 'Prive / Penyaluran ke Keluarga',
+        amount: String(amt),
+        date: curDate,
+        wallet: body.businessWallet || 'Kas Usaha',
+        notes: body.notes || 'Penyaluran laba usaha ke rekening rumah tangga',
+      };
+
+      const hhPayload = {
+        user_uid: 'keluarga_utama',
+        type: 'income',
+        category: 'Usaha Sampingan',
+        amount: String(amt),
+        date: curDate,
+        wallet: body.householdWallet || 'BCA',
+        notes: body.notes || 'Terima bagi hasil/prive dari usaha sampingan',
+      };
+
+      if (supabase) {
+        try {
+          supabase.from('business_transactions').insert([bizPayload]);
+          supabase.from('transactions').insert([hhPayload]);
+        } catch (e) {
+          addToPendingQueue('business_transactions', 'insert', bizPayload);
+          addToPendingQueue('transactions', 'insert', hhPayload);
+        }
+      } else {
+        addToPendingQueue('business_transactions', 'insert', bizPayload);
+        addToPendingQueue('transactions', 'insert', hhPayload);
+      }
+
+      // Business expense in localCache
       localCache.business.unshift({
         id: Date.now(),
         userUid: 'keluarga_utama',
@@ -1281,7 +1497,7 @@ export class ApiClient {
       });
       saveToStorage(STORAGE_KEYS.BUSINESS, localCache.business);
 
-      // Household income
+      // Household income in localCache
       localCache.transactions.unshift({
         id: Date.now() + 1,
         userUid: 'keluarga_utama',
@@ -1728,6 +1944,14 @@ export class ApiClient {
         count: 0,
       };
     }
+  }
+
+  async syncPendingQueue(): Promise<{ synced: number; remaining: number }> {
+    return await syncPendingQueue();
+  }
+
+  getPendingQueueCount(): number {
+    return getPendingQueue().length;
   }
 
   async getDatabaseStatus(): Promise<{

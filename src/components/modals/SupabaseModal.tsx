@@ -18,7 +18,13 @@ import {
   Save,
   Trash2,
   Lock,
-  Globe
+  Globe,
+  Users,
+  Heart,
+  Share2,
+  Smartphone,
+  Send,
+  Zap
 } from 'lucide-react';
 import { ApiClient } from '../../lib/api.ts';
 import { 
@@ -26,19 +32,23 @@ import {
   saveSupabaseConfig, 
   clearSupabaseConfig, 
   checkSupabaseTablesExist,
-  getSupabaseProjectRef 
+  getSupabaseProjectRef,
+  createSpousePairingLink,
+  createWhatsAppShareLink
 } from '../../lib/supabase.ts';
 
 interface SupabaseModalProps {
   isOpen: boolean;
   onClose: () => void;
   api: ApiClient;
+  initialTab?: 'connect' | 'spouse_sync' | 'rls_fix' | 'sql' | 'guide';
 }
 
 export const SupabaseModal: React.FC<SupabaseModalProps> = ({
   isOpen,
   onClose,
   api,
+  initialTab = 'spouse_sync',
 }) => {
   const [copiedSection, setCopiedSection] = useState<string | null>(null);
   const [dbStatus, setDbStatus] = useState<{
@@ -58,27 +68,34 @@ export const SupabaseModal: React.FC<SupabaseModalProps> = ({
   const [isTesting, setIsTesting] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<{ success: boolean; text: string } | null>(null);
-  const [activeTab, setActiveTab] = useState<'connect' | 'rls_fix' | 'sql' | 'guide'>('connect');
+  const [activeTab, setActiveTab] = useState<'connect' | 'spouse_sync' | 'rls_fix' | 'sql' | 'guide'>(initialTab);
 
   // Input states for direct configuration
   const [inputUrl, setInputUrl] = useState('');
   const [inputKey, setInputKey] = useState('');
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
+  const [isSavingServer, setIsSavingServer] = useState(false);
+  const [pendingCount, setPendingCount] = useState(0);
 
   useEffect(() => {
     if (isOpen) {
+      if (initialTab) setActiveTab(initialTab);
       const cfg = getSupabaseConfig();
       setInputUrl(cfg.url);
       setInputKey(cfg.key);
       testConnection();
+      try {
+        setPendingCount(api.getPendingQueueCount());
+      } catch {}
     }
-  }, [isOpen]);
+  }, [isOpen, initialTab, api]);
 
   const testConnection = async () => {
     setIsTesting(true);
     try {
       const status = await api.getDatabaseStatus();
       setDbStatus(status);
+      setPendingCount(api.getPendingQueueCount());
     } catch (err: any) {
       setDbStatus({
         connected: false,
@@ -103,6 +120,34 @@ export const SupabaseModal: React.FC<SupabaseModalProps> = ({
     }
   };
 
+  const handleSaveToServer = async () => {
+    if (!inputUrl || !inputKey) {
+      alert('Isi URL dan Anon Key terlebih dahulu sebelum menyimpan ke server keluarga.');
+      return;
+    }
+    setIsSavingServer(true);
+    setSaveStatus(null);
+    try {
+      saveSupabaseConfig(inputUrl, inputKey);
+      const res = await fetch('/api/sync/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: inputUrl, key: inputKey }),
+      });
+      if (res.ok) {
+        setSaveStatus('✅ Berhasil disimpan ke Server Keluarga! Seluruh perangkat baru yang membuka link aplikasi akan otomatis terhubung ke database ini.');
+      } else {
+        setSaveStatus('Tersimpan di browser lokal perangkat ini.');
+      }
+      await testConnection();
+    } catch {
+      setSaveStatus('Tersimpan di browser lokal perangkat ini.');
+    } finally {
+      setIsSavingServer(false);
+      setTimeout(() => setSaveStatus(null), 5000);
+    }
+  };
+
   const handleDisconnect = () => {
     clearSupabaseConfig();
     setInputUrl('');
@@ -116,17 +161,21 @@ export const SupabaseModal: React.FC<SupabaseModalProps> = ({
     setIsSyncing(true);
     setSyncMessage(null);
     try {
-      const res = await fetch('/api/supabase/sync-all', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      const data = await res.json();
-      if (data.success) {
-        setSyncMessage({ success: true, text: data.message });
-        testConnection();
+      // 1. Flush local unsynced pending queue first
+      const queueRes = await api.syncPendingQueue();
+      // 2. Sync all local records to Supabase
+      const syncRes = await api.syncAllLocalToCloud();
+      setPendingCount(api.getPendingQueueCount());
+
+      if (syncRes.success) {
+        setSyncMessage({ 
+          success: true, 
+          text: `Sinkronisasi berhasil! ${queueRes.synced} antrean terkirim. ${syncRes.count} data tersinkronisasi ke cloud.` 
+        });
       } else {
-        setSyncMessage({ success: false, text: data.error || 'Gagal sinkronisasi data' });
+        setSyncMessage({ success: false, text: syncRes.message || 'Gagal sinkronisasi data' });
       }
+      testConnection();
     } catch (err: any) {
       setSyncMessage({ success: false, text: err.message || 'Terjadi kesalahan saat sinkronisasi' });
     } finally {
@@ -397,6 +446,20 @@ ALTER TABLE IF EXISTS monthly_reports DISABLE ROW LEVEL SECURITY;
         {/* Navigation Tabs */}
         <div className="flex border-b border-slate-200 bg-white px-5 pt-3 gap-2 overflow-x-auto">
           <button
+            onClick={() => setActiveTab('spouse_sync')}
+            className={`pb-2.5 px-3 text-xs font-bold border-b-2 transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+              activeTab === 'spouse_sync'
+                ? 'border-orange-500 text-orange-700 bg-orange-50/50 rounded-t-lg'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <Smartphone className="w-3.5 h-3.5 text-orange-600" />
+            <span>1. 📱 Tautkan HP Suami & Istri</span>
+            <span className="px-1.5 py-0.5 text-[9px] bg-emerald-100 text-emerald-800 font-extrabold rounded-full">
+              Sinkron
+            </span>
+          </button>
+          <button
             onClick={() => setActiveTab('connect')}
             className={`pb-2.5 px-3 text-xs font-bold border-b-2 transition-all cursor-pointer whitespace-nowrap ${
               activeTab === 'connect'
@@ -404,7 +467,7 @@ ALTER TABLE IF EXISTS monthly_reports DISABLE ROW LEVEL SECURITY;
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
-            1. Sambungkan Supabase (URL & Key)
+            2. Sambungkan Supabase (URL & Key)
           </button>
           <button
             onClick={() => setActiveTab('rls_fix')}
@@ -415,7 +478,7 @@ ALTER TABLE IF EXISTS monthly_reports DISABLE ROW LEVEL SECURITY;
             }`}
           >
             <AlertCircle className="w-3.5 h-3.5" />
-            2. Solusi Data Kosong (RLS)
+            3. Solusi Data Kosong (RLS)
           </button>
           <button
             onClick={() => setActiveTab('sql')}
@@ -426,7 +489,7 @@ ALTER TABLE IF EXISTS monthly_reports DISABLE ROW LEVEL SECURITY;
             }`}
           >
             <Terminal className="w-3.5 h-3.5" />
-            3. Skrip Tabel Lengkap
+            4. Skrip Tabel Lengkap
           </button>
           <button
             onClick={() => setActiveTab('guide')}
@@ -436,12 +499,195 @@ ALTER TABLE IF EXISTS monthly_reports DISABLE ROW LEVEL SECURITY;
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
-            4. Panduan Netlify & PWA
+            5. Panduan Netlify & PWA
           </button>
         </div>
 
         {/* Content Body */}
         <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-6">
+
+          {/* TAB 0: TAUTKAN HP SUAMI & ISTRI */}
+          {activeTab === 'spouse_sync' && (
+            <div className="space-y-5 animate-in fade-in duration-200">
+              {/* Diagnosis box */}
+              <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-50 to-orange-50 border border-orange-200/90 shadow-xs">
+                <div className="flex items-start gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-orange-500 text-white flex items-center justify-center shrink-0 shadow-xs">
+                    <Heart className="w-5 h-5 text-white" />
+                  </div>
+                  <div className="space-y-1">
+                    <h4 className="text-sm font-extrabold text-slate-900">
+                      Mengapa Data Suami & Istri Sempat Tidak Sama?
+                    </h4>
+                    <p className="text-xs text-slate-700 leading-relaxed">
+                      Aplikasi ini dirancang untuk pembukuan keluarga bersama. Ketidaksamaan data sebelumnya terjadi karena <strong>HP suami dan HP istri belum terhubung ke alamat Database Supabase yang sama</strong>, atau input di salah satu HP belum terkirim ke database karena pengaturan keamanan (RLS).
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Step 1: 1-Click WhatsApp Invite / Link */}
+              <div className="bg-white p-5 rounded-2xl border-2 border-emerald-500/40 shadow-sm space-y-4">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center font-extrabold text-xs">
+                      1
+                    </span>
+                    <h5 className="font-extrabold text-sm text-slate-900">
+                      Tautkan HP Pasangan dalam 1 Detik (1-Klik via WhatsApp)
+                    </h5>
+                  </div>
+                  <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                    Paling Mudah & Otomatis
+                  </span>
+                </div>
+
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Cukup kirim link sinkronisasi di bawah ini ke WhatsApp istri. Ketika istri membuka link tersebut di HP-nya, aplikasi akan <strong>secara otomatis menyambungkan database keluarga yang sama</strong> tanpa perlu salin kode apapun!
+                </p>
+
+                {/* Direct Action Buttons */}
+                <div className="flex flex-col sm:flex-row gap-2.5 pt-1">
+                  <a
+                    href={createWhatsAppShareLink(inputUrl, inputKey)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs px-4 py-2.5 rounded-xl shadow-sm transition-all cursor-pointer text-center"
+                  >
+                    <Send className="w-4 h-4" />
+                    <span>📱 Kirim Link ke WhatsApp Istri</span>
+                  </a>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const link = createSpousePairingLink(inputUrl, inputKey);
+                      handleCopy(link, 'spouse_link');
+                    }}
+                    className="flex items-center justify-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs px-4 py-2.5 rounded-xl border border-slate-300 transition-colors cursor-pointer"
+                  >
+                    {copiedSection === 'spouse_link' ? (
+                      <>
+                        <Check className="w-4 h-4 text-emerald-600" />
+                        <span className="text-emerald-700 font-extrabold">Link Disalin!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-4 h-4 text-slate-600" />
+                        <span>Salin Link Tautan</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {/* Link Preview */}
+                <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 flex items-center gap-2 text-[11px] text-slate-600 break-all font-mono">
+                  <span className="truncate flex-1">
+                    {createSpousePairingLink(inputUrl, inputKey)}
+                  </span>
+                </div>
+              </div>
+
+              {/* Step 2: Simpan & Terapkan ke Server Cloud */}
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-3">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="w-6 h-6 rounded-full bg-orange-600 text-white flex items-center justify-center font-extrabold text-xs">
+                      2
+                    </span>
+                    <h5 className="font-extrabold text-sm text-slate-900">
+                      Selaraskan Database ke Server Keluarga
+                    </h5>
+                  </div>
+                </div>
+
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Simpan kredensial ini ke server aplikasi, sehingga siapapun anggota keluarga yang membuka web aplikasi ini di masa depan langsung otomatis membaca database yang sama.
+                </p>
+
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={handleSaveToServer}
+                    disabled={isSavingServer}
+                    className="flex items-center gap-2 bg-orange-600 hover:bg-orange-500 text-white font-extrabold text-xs px-4 py-2 rounded-xl shadow-xs transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    <Server className="w-3.5 h-3.5" />
+                    <span>{isSavingServer ? 'Menyimpan ke Server...' : 'Simpan & Terapkan ke Server'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Step 3: Status Realtime & Antrean Sinkronisasi */}
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-3">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center font-extrabold text-xs">
+                      3
+                    </span>
+                    <h5 className="font-extrabold text-sm text-slate-900">
+                      Pemeriksaan Status & Sinkronisasi Realtime
+                    </h5>
+                  </div>
+                  {pendingCount > 0 && (
+                    <span className="px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 font-bold text-[11px] border border-amber-300">
+                      {pendingCount} Data Menunggu Terkirim
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
+                    <span className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">Database Cloud</span>
+                    <p className="font-mono font-bold text-slate-900 truncate">
+                      {projectRef ? `${projectRef}.supabase.co` : (cleanSupabaseUrl || 'Belum diatur')}
+                    </p>
+                    <p className="text-[11px] text-emerald-700 font-medium flex items-center gap-1">
+                      <CheckCircle2 className="w-3 h-3" />
+                      {dbStatus?.connected ? 'Terhubung Aktif' : 'Memeriksa...'}
+                    </p>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
+                    <span className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">Antrean Sinkronisasi Lokal</span>
+                    <p className="font-bold text-slate-900">
+                      {pendingCount === 0 ? '0 Antrean (Semua data tersinkron)' : `${pendingCount} item menunggu sinyal`}
+                    </p>
+                    <p className="text-[11px] text-slate-500">
+                      Otomatis dikirim saat koneksi stabil
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 pt-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={handleSyncAll}
+                    disabled={isSyncing}
+                    className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs px-4 py-2.5 rounded-xl shadow-xs transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+                    <span>{isSyncing ? 'Sedang Menyinkronkan...' : '⚡ Sinkronkan Semua Data Sekarang (Paksa 2-Arah)'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('rls_fix')}
+                    className="flex items-center gap-1.5 text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 px-3 py-2.5 rounded-xl transition-colors cursor-pointer"
+                  >
+                    <AlertCircle className="w-3.5 h-3.5" />
+                    <span>Cek RLS Database</span>
+                  </button>
+                </div>
+
+                {syncMessage && (
+                  <div className={`p-3 rounded-xl text-xs font-bold ${syncMessage.success ? 'bg-emerald-100 text-emerald-900 border border-emerald-300' : 'bg-rose-100 text-rose-900 border border-rose-300'}`}>
+                    {syncMessage.text}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
           
           {/* TAB 1: SAMBUNGKAN SUPABASE */}
           {activeTab === 'connect' && (

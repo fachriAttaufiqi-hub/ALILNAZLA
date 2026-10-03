@@ -9,7 +9,11 @@ import {
   Calendar,
   Sparkles,
   Database,
-  Lock
+  Lock,
+  Smartphone,
+  Heart,
+  RefreshCw,
+  CheckCircle2
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.tsx';
 import { formatMonthIndo } from '../utils/format.ts';
@@ -20,6 +24,9 @@ interface HeaderProps {
   onOpenQuickTx: (type?: 'income' | 'expense') => void;
   onOpenBudgetModal: () => void;
   onOpenSupabaseModal?: () => void;
+  onOpenSpouseSync?: () => void;
+  onManualSync?: () => Promise<void> | void;
+  isSyncing?: boolean;
   onLockApp?: () => void;
 }
 
@@ -29,6 +36,9 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenQuickTx,
   onOpenBudgetModal,
   onOpenSupabaseModal,
+  onOpenSpouseSync,
+  onManualSync,
+  isSyncing = false,
   onLockApp,
 }) => {
   const { user, signInWithGoogle, signOutUser } = useAuth();
@@ -61,7 +71,16 @@ export const Header: React.FC<HeaderProps> = ({
                 <span className="font-extrabold text-xl tracking-tight text-white drop-shadow-xs">
                   KeluargaFin
                 </span>
-                {onOpenSupabaseModal ? (
+                {onOpenSpouseSync ? (
+                  <button
+                    onClick={onOpenSpouseSync}
+                    title="Tautkan aplikasi dengan HP istri/suami agar sinkron realtime"
+                    className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/90 hover:bg-emerald-500 text-white border border-emerald-300/50 shadow-xs transition-colors cursor-pointer"
+                  >
+                    <Heart className="w-2.5 h-2.5 text-white fill-white" />
+                    Tautkan Pasangan
+                  </button>
+                ) : onOpenSupabaseModal ? (
                   <button
                     onClick={onOpenSupabaseModal}
                     title="Buka panduan & konfigurasi Supabase"
@@ -101,6 +120,19 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Center / Right Controls */}
         <div className="flex items-center gap-2.5 w-full sm:w-auto justify-end flex-wrap">
           
+          {/* Sync Now Button */}
+          {onManualSync && (
+            <button
+              onClick={onManualSync}
+              disabled={isSyncing}
+              title="Sinkronkan data realtime dengan HP pasangan sekarang"
+              className="flex items-center gap-1.5 bg-emerald-950/20 hover:bg-emerald-950/30 border border-emerald-300/40 px-2.5 py-1.5 sm:py-2 rounded-xl text-xs font-bold text-white transition-all cursor-pointer disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 text-emerald-200 ${isSyncing ? 'animate-spin' : ''}`} />
+              <span className="hidden sm:inline">{isSyncing ? 'Menyinkronkan...' : 'Sinkron Pasangan'}</span>
+            </button>
+          )}
+
           {/* Supabase Quick Guide Button */}
           {onOpenSupabaseModal && (
             <button
@@ -108,7 +140,7 @@ export const Header: React.FC<HeaderProps> = ({
               className="hidden lg:flex items-center gap-1.5 bg-white/15 hover:bg-white/25 border border-white/25 px-2.5 py-1.5 rounded-xl text-xs font-semibold text-white transition-all cursor-pointer"
             >
               <Database className="w-3.5 h-3.5 text-amber-100" />
-              <span>Koneksi Supabase</span>
+              <span>Database Supabase</span>
             </button>
           )}
 

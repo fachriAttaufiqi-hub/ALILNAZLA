@@ -6,7 +6,12 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ApiClient, getCachedHouseholdSnapshot, computeDashboardSummary } from './lib/api';
-import { supabase } from './lib/supabase';
+import { 
+  supabase, 
+  checkAndApplyUrlPairing, 
+  fetchServerSyncConfig, 
+  onSupabaseConfigChange 
+} from './lib/supabase';
 import { Header } from './components/Header';
 import { Sidebar, NavTab } from './components/Sidebar';
 import { DashboardView } from './components/DashboardView';
@@ -113,6 +118,10 @@ function MainApp() {
 
   const [isBudgetModalOpen, setIsBudgetModalOpen] = useState(false);
   const [isSupabaseModalOpen, setIsSupabaseModalOpen] = useState(false);
+  const [supabaseModalTab, setSupabaseModalTab] = useState<'connect' | 'spouse_sync' | 'rls_fix' | 'sql' | 'guide'>('spouse_sync');
+  const [justPairedBanner, setJustPairedBanner] = useState(false);
+  const [isManualSyncing, setIsManualSyncing] = useState(false);
+  const [supabaseVersion, setSupabaseVersion] = useState(0);
 
   // Fetch core household data efficiently without duplicate queries
   const fetchData = useCallback(async (isSilent = false) => {
@@ -169,7 +178,32 @@ function MainApp() {
     }
   }, [currentTab, currentPeriod, api]);
 
-  // REALTIME SYNCRONIZATION SUPABASE (Multi-Device & Delete Sync, Debounced)
+  // 1. Initial Pairing detection & Server config check
+  useEffect(() => {
+    const pairResult = checkAndApplyUrlPairing();
+    if (pairResult.paired) {
+      setJustPairedBanner(true);
+      fetchData(true);
+    } else if (typeof window !== 'undefined' && localStorage.getItem('keluargafin_just_paired') === 'true') {
+      setJustPairedBanner(true);
+      localStorage.removeItem('keluargafin_just_paired');
+    }
+
+    fetchServerSyncConfig().then(updated => {
+      if (updated) fetchData(true);
+    });
+
+    api.syncPendingQueue().catch(() => {});
+  }, [api, fetchData]);
+
+  // 2. Listen to Supabase credential changes in runtime
+  useEffect(() => {
+    return onSupabaseConfigChange(() => {
+      setSupabaseVersion(v => v + 1);
+    });
+  }, []);
+
+  // 3. REALTIME SYNCHRONIZATION SUPABASE (Multi-Device, Online & Sleep Resilient)
   useEffect(() => {
     fetchData(true);
 
@@ -179,6 +213,7 @@ function MainApp() {
     const triggerDebouncedFetch = () => {
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
+        api.syncPendingQueue().catch(() => {});
         fetchDataRef.current(true);
       }, 250);
     };
@@ -194,13 +229,50 @@ function MainApp() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, triggerDebouncedFetch)
       .subscribe();
 
+    // Mobile sleep & app-switch resiliency: sync when user returns to app
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible') {
+        api.syncPendingQueue().catch(() => {});
+        fetchDataRef.current(true);
+      }
+    };
+
+    window.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    window.addEventListener('online', handleVisibilityOrFocus);
+
+    // Heartbeat sync every 15 seconds while active
+    const pollInterval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        fetchDataRef.current(true);
+      }
+    }, 15000);
+
     return () => {
       if (debounceTimer) clearTimeout(debounceTimer);
+      clearInterval(pollInterval);
+      window.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      window.removeEventListener('online', handleVisibilityOrFocus);
       if (supabase) {
         supabase.removeChannel(channel);
       }
     };
-  }, []); // Run once on mount! Maintains persistent connection
+  }, [supabaseVersion, api]);
+
+  // Manual 2-way sync trigger for Header / buttons
+  const handleManualSync = async () => {
+    setIsManualSyncing(true);
+    try {
+      await api.syncPendingQueue();
+      await api.syncAllLocalToCloud();
+      await fetchData();
+    } catch (err) {
+      console.warn('Manual sync warning:', err);
+    } finally {
+      setTimeout(() => setIsManualSyncing(false), 800);
+    }
+  };
 
   // Unified Modal Open Handler
   const handleOpenUnifiedModal = (type: UnifiedEntryType = 'expense_rt') => {
@@ -369,9 +441,38 @@ function MainApp() {
         onPeriodChange={setCurrentPeriod}
         onOpenQuickTx={() => handleOpenUnifiedModal('expense_rt')}
         onOpenBudgetModal={() => setIsBudgetModalOpen(true)}
-        onOpenSupabaseModal={() => setIsSupabaseModalOpen(true)}
+        onOpenSupabaseModal={() => {
+          setSupabaseModalTab('connect');
+          setIsSupabaseModalOpen(true);
+        }}
+        onOpenSpouseSync={() => {
+          setSupabaseModalTab('spouse_sync');
+          setIsSupabaseModalOpen(true);
+        }}
+        onManualSync={handleManualSync}
+        isSyncing={isManualSyncing}
         onLockApp={handleLockApp}
       />
+
+      {/* Celebratory Banner when Spouse Phone pairs via 1-click Link */}
+      {justPairedBanner && (
+        <div className="bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 text-white px-4 py-3 text-xs sm:text-sm font-bold shadow-md animate-in slide-in-from-top duration-300 border-b border-emerald-400/30">
+          <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <span className="text-xl">🎉</span>
+              <p className="leading-snug">
+                <strong>HP Anda & Pasangan Berhasil Ditautkan!</strong> Aplikasi kini terhubung ke database cloud bersama. Setiap penambahan atau penghapusan data otomatis sinkron dua arah seketika.
+              </p>
+            </div>
+            <button
+              onClick={() => setJustPairedBanner(false)}
+              className="bg-white/20 hover:bg-white/30 text-white px-3 py-1 rounded-xl text-xs font-black transition-colors cursor-pointer shrink-0"
+            >
+              Mengerti ✕
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 max-w-7xl w-full mx-auto flex flex-col md:flex-row">
         <Sidebar
@@ -578,6 +679,7 @@ function MainApp() {
         isOpen={isSupabaseModalOpen}
         onClose={() => setIsSupabaseModalOpen(false)}
         api={api}
+        initialTab={supabaseModalTab}
       />
 
       <PWAInstallAndSync
