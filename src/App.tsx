@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import { ApiClient } from './lib/api';
+import { ApiClient, getCachedHouseholdSnapshot, computeDashboardSummary } from './lib/api';
 import { supabase } from './lib/supabase';
 import { Header } from './components/Header';
 import { Sidebar, NavTab } from './components/Sidebar';
@@ -78,11 +78,11 @@ function MainApp() {
     return new ApiClient(getFreshToken, false);
   }, [getFreshToken]);
 
-  // Data states
-  const [summary, setSummary] = useState<DashboardSummary | null>(null);
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [debts, setDebts] = useState<Debt[]>([]);
-  const [savings, setSavings] = useState<Saving[]>([]);
+  // Data states initialized from local storage cache for 0ms Instant First Paint
+  const [summary, setSummary] = useState<DashboardSummary | null>(() => computeDashboardSummary(currentPeriod));
+  const [transactions, setTransactions] = useState<Transaction[]>(() => getCachedHouseholdSnapshot().transactions);
+  const [debts, setDebts] = useState<Debt[]>(() => getCachedHouseholdSnapshot().debts);
+  const [savings, setSavings] = useState<Saving[]>(() => getCachedHouseholdSnapshot().savings);
   const [reportData, setReportData] = useState<MonthlyReportResponse | null>(null);
   const [historyReports, setHistoryReports] = useState<MonthlyReportRecord[]>([]);
 
@@ -114,67 +114,93 @@ function MainApp() {
   const [isBudgetModalOpen, setIsBudgetModalOpen] = useState(false);
   const [isSupabaseModalOpen, setIsSupabaseModalOpen] = useState(false);
 
-  // Fetch all core household data
-  const fetchData = useCallback(async () => {
-    setLoadingData(true);
+  // Fetch core household data efficiently without duplicate queries
+  const fetchData = useCallback(async (isSilent = false) => {
+    if (!isSilent && transactions.length === 0) {
+      setLoadingData(true);
+    }
     try {
-      const [sumRes, txRes, debtRes, savRes, repRes, histRes] = await Promise.all([
-        api.getDashboardSummary(),
+      const [txRes, debtRes, savRes, sumRes] = await Promise.all([
         api.getTransactions({ period: currentPeriod }),
         api.getDebts(),
         api.getSavings(),
-        api.getMonthlyReport(currentPeriod),
-        api.getReportsHistory(),
+        api.getDashboardSummary(currentPeriod),
       ]);
 
-      setSummary(sumRes);
       setTransactions(txRes);
       setDebts(debtRes);
       setSavings(savRes);
-      setReportData(repRes);
-      setHistoryReports(histRes);
+      setSummary(sumRes);
+
+      if (currentTab === 'reports') {
+        const [repRes, histRes] = await Promise.all([
+          api.getMonthlyReport(currentPeriod),
+          api.getReportsHistory(),
+        ]);
+        setReportData(repRes);
+        setHistoryReports(histRes);
+      }
     } catch (err) {
       console.error('Failed to load application data:', err);
     } finally {
       setLoadingData(false);
     }
-  }, [api, currentPeriod]);
+  }, [api, currentPeriod, currentTab, transactions.length]);
 
-  // REALTIME SYNCRONIZATION SUPABASE (Multi-Device & Delete Sync)
+  // Keep ref to avoid recreating WebSocket connection on every month change
+  const fetchDataRef = useRef(fetchData);
+  fetchDataRef.current = fetchData;
+
+  // Background fetch when month period changes
   useEffect(() => {
-    fetchData();
+    fetchData(true);
+  }, [currentPeriod]);
+
+  // Lazy fetch reports when switching to reports tab
+  useEffect(() => {
+    if (currentTab === 'reports') {
+      Promise.all([
+        api.getMonthlyReport(currentPeriod),
+        api.getReportsHistory(),
+      ]).then(([repRes, histRes]) => {
+        setReportData(repRes);
+        setHistoryReports(histRes);
+      }).catch(console.error);
+    }
+  }, [currentTab, currentPeriod, api]);
+
+  // REALTIME SYNCRONIZATION SUPABASE (Multi-Device & Delete Sync, Debounced)
+  useEffect(() => {
+    fetchData(true);
 
     if (!supabase) return;
+
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const triggerDebouncedFetch = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        fetchDataRef.current(true);
+      }, 250);
+    };
 
     // Berlangganan Realtime Postgres Changes untuk setiap tabel agar hapus/tambah/ubah langsung sinkron ke semua perangkat
     const channel = supabase
       .channel('supabase-realtime-multidevice-sync')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' }, () => {
-        fetchData();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'debts' }, () => {
-        fetchData();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'debt_ledger_entries' }, () => {
-        fetchData();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'savings' }, () => {
-        fetchData();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'business_transactions' }, () => {
-        fetchData();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () => {
-        fetchData();
-      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' }, triggerDebouncedFetch)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'debts' }, triggerDebouncedFetch)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'debt_ledger_entries' }, triggerDebouncedFetch)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'savings' }, triggerDebouncedFetch)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'business_transactions' }, triggerDebouncedFetch)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, triggerDebouncedFetch)
       .subscribe();
 
     return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
       if (supabase) {
         supabase.removeChannel(channel);
       }
     };
-  }, [fetchData]);
+  }, []); // Run once on mount! Maintains persistent connection
 
   // Unified Modal Open Handler
   const handleOpenUnifiedModal = (type: UnifiedEntryType = 'expense_rt') => {

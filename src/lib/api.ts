@@ -228,6 +228,52 @@ const localCache = {
   reportsHistory: loadFromStorage<MonthlyReportRecord[]>(STORAGE_KEYS.REPORTS, []),
 };
 
+// Snapshot helper for 0ms initial UI render
+export const getCachedHouseholdSnapshot = () => ({
+  budget: localCache.budget,
+  transactions: localCache.transactions,
+  debts: localCache.debts,
+  savings: localCache.savings,
+  business: localCache.business,
+});
+
+// Fast in-memory summary computation without redundant network calls
+export const computeDashboardSummary = (period: string): DashboardSummary => {
+  const curTx = localCache.transactions.filter(t => t.date.startsWith(period));
+  const inc = curTx.filter(t => t.type === 'income').reduce((a, b) => a + parseFloat(b.amount || '0'), 0);
+  const exp = curTx.filter(t => t.type === 'expense').reduce((a, b) => a + parseFloat(b.amount || '0'), 0);
+  const bgt = parseFloat(localCache.budget || '0');
+
+  const totSav = localCache.savings.reduce((a, b) => a + parseFloat(b.currentAmount || '0'), 0);
+  const totSavTar = localCache.savings.reduce((a, b) => a + parseFloat(b.targetAmount || '0'), 0);
+
+  let totDebt = 0;
+  let totRec = 0;
+  localCache.debts.forEach(d => {
+    if (d.status === 'active') {
+      const rem = Math.max(0, parseFloat(d.totalAmount || '0') - parseFloat(d.paidAmount || '0'));
+      if (d.type === 'debt') totDebt += rem;
+      else totRec += rem;
+    }
+  });
+
+  return {
+    period,
+    totalIncome: inc,
+    totalExpense: exp,
+    netCashflow: inc - exp,
+    monthlyBudget: bgt,
+    budgetUsedPercent: bgt > 0 ? Math.min(100, Math.round((exp / bgt) * 100)) : 0,
+    totalSavingsAccumulated: totSav,
+    totalSavingsTarget: totSavTar,
+    totalDebtRemaining: totDebt,
+    totalReceivableRemaining: totRec,
+    recentTransactions: [...localCache.transactions].slice(0, 5),
+  };
+};
+
+let isBackendAvailable = true;
+
 export class ApiClient {
   private getToken: () => Promise<string | null>;
   private isDemo: boolean;
@@ -239,11 +285,13 @@ export class ApiClient {
 
   // Universal request with automatic fallback to Direct Supabase or LocalStorage
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-    const isNetlifyOrStatic = typeof window !== 'undefined' && 
-      (window.location.hostname.includes('netlify.app') || window.location.port === '' || !window.location.port.includes('3000'));
+    const isStaticHost = typeof window !== 'undefined' && 
+      (window.location.hostname.includes('netlify.app') || 
+       window.location.hostname.includes('github.io') || 
+       !window.location.port.includes('3000'));
 
-    // Try Express backend if not definitely on static Netlify host
-    if (!isNetlifyOrStatic) {
+    // Try Express backend if running and not definitively static
+    if (!isStaticHost && isBackendAvailable) {
       try {
         const token = await this.getToken();
         const headers: Record<string, string> = {
@@ -253,7 +301,7 @@ export class ApiClient {
         };
 
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 4000);
+        const timeoutId = setTimeout(() => controller.abort(), 1200);
 
         const res = await fetch(endpoint, {
           ...options,
@@ -266,7 +314,8 @@ export class ApiClient {
           return await res.json();
         }
       } catch (err) {
-        // Fall through to Direct Supabase / LocalStorage fallback
+        // Backend not responsive, fallback directly
+        isBackendAvailable = false;
       }
     }
 
@@ -320,103 +369,10 @@ export class ApiClient {
       return { success: true, monthlyBudget: localCache.budget } as T;
     }
 
-    // 3. Dashboard Summary
+    // 3. Dashboard Summary (Fast in-memory computation from localCache)
     if (pathname === '/api/dashboard/summary') {
-      const currentPeriod = new Date().toISOString().slice(0, 7);
-
-      // Pre-sync latest transactions, debts, savings from Supabase if online
-      if (supabase) {
-        try {
-          const [txRes, debtRes, savRes] = await Promise.all([
-            supabase.from('transactions').select('*').order('date', { ascending: false }),
-            supabase.from('debts').select('*').order('id', { ascending: false }),
-            supabase.from('savings').select('*').order('id', { ascending: false }),
-          ]);
-
-          if (!txRes.error && txRes.data !== null) {
-            localCache.transactions = txRes.data.map((row: any) => ({
-              id: row.id,
-              userUid: row.user_uid || 'keluarga_utama',
-              type: row.type,
-              category: row.category,
-              amount: String(row.amount),
-              date: row.date,
-              wallet: row.wallet || 'Tunai',
-              notes: row.notes || '',
-              createdAt: row.created_at,
-            }));
-            saveToStorage(STORAGE_KEYS.TRANSACTIONS, localCache.transactions);
-          }
-
-          if (!debtRes.error && debtRes.data !== null) {
-            localCache.debts = debtRes.data.map((row: any) => ({
-              id: row.id,
-              userUid: row.user_uid || 'keluarga_utama',
-              type: row.type,
-              person: row.person,
-              totalAmount: String(row.total_amount),
-              paidAmount: String(row.paid_amount || '0'),
-              dueDate: row.due_date || null,
-              status: row.status || 'active',
-              notes: row.notes || '',
-              createdAt: row.created_at,
-              updatedAt: row.updated_at,
-            }));
-            saveToStorage(STORAGE_KEYS.DEBTS, localCache.debts);
-          }
-
-          if (!savRes.error && savRes.data !== null) {
-            localCache.savings = savRes.data.map((row: any) => ({
-              id: row.id,
-              userUid: row.user_uid || 'keluarga_utama',
-              name: row.name,
-              targetAmount: String(row.target_amount),
-              currentAmount: String(row.current_amount || '0'),
-              targetDate: row.target_date || null,
-              category: row.category || 'Umum',
-              color: row.color || '#10b981',
-              notes: row.notes || '',
-              createdAt: row.created_at,
-              updatedAt: row.updated_at,
-            }));
-            saveToStorage(STORAGE_KEYS.SAVINGS, localCache.savings);
-          }
-        } catch (e: any) {
-          console.warn('Supabase summary preload error:', e?.message);
-        }
-      }
-
-      const curTx = localCache.transactions.filter(t => t.date.startsWith(currentPeriod));
-      const inc = curTx.filter(t => t.type === 'income').reduce((a, b) => a + parseFloat(b.amount || '0'), 0);
-      const exp = curTx.filter(t => t.type === 'expense').reduce((a, b) => a + parseFloat(b.amount || '0'), 0);
-      const bgt = parseFloat(localCache.budget || '0');
-
-      const totSav = localCache.savings.reduce((a, b) => a + parseFloat(b.currentAmount || '0'), 0);
-      const totSavTar = localCache.savings.reduce((a, b) => a + parseFloat(b.targetAmount || '0'), 0);
-
-      let totDebt = 0;
-      let totRec = 0;
-      localCache.debts.forEach(d => {
-        if (d.status === 'active') {
-          const rem = Math.max(0, parseFloat(d.totalAmount || '0') - parseFloat(d.paidAmount || '0'));
-          if (d.type === 'debt') totDebt += rem;
-          else totRec += rem;
-        }
-      });
-
-      return {
-        period: currentPeriod,
-        totalIncome: inc,
-        totalExpense: exp,
-        netCashflow: inc - exp,
-        monthlyBudget: bgt,
-        budgetUsedPercent: bgt > 0 ? Math.min(100, Math.round((exp / bgt) * 100)) : 0,
-        totalSavingsAccumulated: totSav,
-        totalSavingsTarget: totSavTar,
-        totalDebtRemaining: totDebt,
-        totalReceivableRemaining: totRec,
-        recentTransactions: [...localCache.transactions].slice(0, 5),
-      } as T;
+      const currentPeriod = url.searchParams.get('period') || new Date().toISOString().slice(0, 7);
+      return computeDashboardSummary(currentPeriod) as T;
     }
 
     // 4. Transactions CRUD
@@ -1474,8 +1430,9 @@ export class ApiClient {
     });
   }
 
-  getDashboardSummary() {
-    return this.request<DashboardSummary>('/api/dashboard/summary');
+  getDashboardSummary(period?: string) {
+    const q = period ? `?period=${period}` : '';
+    return this.request<DashboardSummary>(`/api/dashboard/summary${q}`);
   }
 
   getTransactions(params?: { period?: string; type?: string; category?: string }) {
