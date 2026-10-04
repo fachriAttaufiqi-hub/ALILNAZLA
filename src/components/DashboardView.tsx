@@ -14,11 +14,17 @@ import {
   Plus,
   ShieldCheck,
   Sparkles,
-  ArrowRight
+  ArrowRight,
+  Heart,
+  RefreshCw,
+  Smartphone,
+  Send,
+  Database
 } from 'lucide-react';
 import { DashboardSummary, Transaction, Debt } from '../types/index.ts';
 import { formatRupiah, formatDateIndo, formatMonthIndo } from '../utils/format.ts';
 import { NavTab } from './Sidebar.tsx';
+import { supabase, cleanSupabaseUrl, createWhatsAppShareLink } from '../lib/supabase.ts';
 
 interface DashboardViewProps {
   summary: DashboardSummary | null;
@@ -28,6 +34,9 @@ interface DashboardViewProps {
   onOpenBudgetModal: () => void;
   onOpenNewDebt: () => void;
   onOpenNewSaving: () => void;
+  onOpenSpouseSync?: () => void;
+  onManualSync?: () => Promise<void> | void;
+  isSyncing?: boolean;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -38,6 +47,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onOpenBudgetModal,
   onOpenNewDebt,
   onOpenNewSaving,
+  onOpenSpouseSync,
+  onManualSync,
+  isSyncing = false,
 }) => {
   if (loading) {
     return (
@@ -114,6 +126,74 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         {/* Ambient background decoration */}
         <div className="absolute -right-10 -bottom-10 w-64 h-64 bg-white/10 rounded-full blur-2xl pointer-events-none" />
         <div className="absolute -left-10 -top-10 w-64 h-64 bg-amber-400/20 rounded-full blur-2xl pointer-events-none" />
+      </div>
+
+      {/* Household Sync & Spouse Pairing Status Banner */}
+      <div className={`rounded-2xl p-4 sm:p-5 border transition-all ${
+        supabase 
+          ? 'bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50 border-emerald-200/90 shadow-xs' 
+          : 'bg-gradient-to-r from-amber-50 via-orange-50 to-amber-50 border-orange-200/90 shadow-sm'
+      }`}>
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 shadow-xs ${
+              supabase ? 'bg-emerald-600 text-white' : 'bg-orange-600 text-white'
+            }`}>
+              <Heart className="w-5 h-5 text-white fill-white" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-sm font-extrabold text-slate-900">
+                  {supabase 
+                    ? '🟢 Sinkronisasi Pasangan Aktif (Cloud Supabase Terhubung)' 
+                    : '📱 Sinkronisasi Suami & Istri: Hubungkan HP Berdua'}
+                </h3>
+                <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${
+                  supabase 
+                    ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' 
+                    : 'bg-amber-100 text-amber-900 border border-amber-300'
+                }`}>
+                  {supabase ? 'Realtime 2-Arah' : 'Perlu Ditautkan'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
+                {supabase 
+                  ? 'Setiap data yang dimasukkan atau dihapus oleh suami/istri otomatis langsung tersinkron seketika ke kedua perangkat.' 
+                  : 'Jika istri sudah mengisi data namun belum muncul di HP suami, tautkan kedua HP ke database keluarga yang sama agar sinkron 100% otomatis tanpa perbedaan data.'}
+              </p>
+            </div>
+          </div>
+
+          {/* Action buttons */}
+          <div className="flex items-center gap-2 w-full sm:w-auto justify-end flex-wrap">
+            {onManualSync && (
+              <button
+                type="button"
+                onClick={onManualSync}
+                disabled={isSyncing}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 text-xs font-bold shadow-xs transition-all cursor-pointer disabled:opacity-50 active:scale-95"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-emerald-600 ${isSyncing ? 'animate-spin' : ''}`} />
+                <span>{isSyncing ? 'Menyinkronkan...' : 'Sinkronkan Sekarang'}</span>
+              </button>
+            )}
+
+            {onOpenSpouseSync && (
+              <button
+                type="button"
+                onClick={onOpenSpouseSync}
+                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-extrabold shadow-xs transition-all cursor-pointer active:scale-95 text-white ${
+                  supabase 
+                    ? 'bg-emerald-600 hover:bg-emerald-500' 
+                    : 'bg-orange-600 hover:bg-orange-500'
+                }`}
+              >
+                <Smartphone className="w-3.5 h-3.5" />
+                <span>{supabase ? 'Kirim Link ke Istri' : 'Tautkan HP Pasangan Sekarang'}</span>
+              </button>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* KPI Cards Grid */}

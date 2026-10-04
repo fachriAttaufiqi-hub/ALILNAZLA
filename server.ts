@@ -6,7 +6,7 @@ import { db } from './src/db/index.ts';
 import { users, transactions, debts, savings, monthlyReports, debtLedgerEntries, businessTransactions } from './src/db/schema.ts';
 import { requireAuth, AuthRequest } from './src/middleware/auth.ts';
 import { eq, and, desc, asc, sql, gte, lte } from 'drizzle-orm';
-import { supabase, isSupabaseApiKeyConfigured, checkSupabaseTablesExist, syncToSupabase, cleanSupabaseUrl } from './src/lib/supabase.ts';
+import { supabase, isSupabaseApiKeyConfigured, checkSupabaseTablesExist, syncToSupabase, cleanSupabaseUrl, cleanSupabaseKey, saveSupabaseConfig } from './src/lib/supabase.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -445,6 +445,8 @@ async function startServer() {
       console.error('Error deleting transaction:', error);
       res.status(500).json({ error: 'Gagal menghapus transaksi' });
     }
+  });
+
   // --- DEBTS & RECEIVABLES CRUD (Shared Family Household) ---
   app.get('/api/debts', requireAuth, async (req: AuthRequest, res) => {
     try {
@@ -730,7 +732,7 @@ async function startServer() {
         await db.insert(transactions).values({
           userUid: SHARED_FAMILY_UID,
           type: txType,
-          category: txCat,
+          category: txCategory,
           amount: String(payVal),
           date: date || new Date().toISOString().split('T')[0],
           wallet: wallet || 'Tunai',
@@ -992,10 +994,6 @@ async function startServer() {
 
       res.json({ success: true, message: 'Data berhasil dihapus' });
     } catch (error) {
-      console.error('Error deleting debt:', error);
-      res.status(500).json({ error: 'Gagal menghapus data hutang/piutang' });
-    }
-  });
       console.error('Error deleting debt:', error);
       res.status(500).json({ error: 'Gagal menghapus data hutang/piutang' });
     }

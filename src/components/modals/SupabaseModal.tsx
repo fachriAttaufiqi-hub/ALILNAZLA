@@ -34,7 +34,8 @@ import {
   checkSupabaseTablesExist,
   getSupabaseProjectRef,
   createSpousePairingLink,
-  createWhatsAppShareLink
+  createWhatsAppShareLink,
+  cleanSupabaseUrl
 } from '../../lib/supabase.ts';
 
 interface SupabaseModalProps {

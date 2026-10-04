@@ -183,14 +183,17 @@ function MainApp() {
     const pairResult = checkAndApplyUrlPairing();
     if (pairResult.paired) {
       setJustPairedBanner(true);
-      fetchData(true);
+      api.syncAllLocalToCloud().then(() => fetchData(true)).catch(() => fetchData(true));
     } else if (typeof window !== 'undefined' && localStorage.getItem('keluargafin_just_paired') === 'true') {
       setJustPairedBanner(true);
       localStorage.removeItem('keluargafin_just_paired');
+      api.syncAllLocalToCloud().then(() => fetchData(true)).catch(() => fetchData(true));
     }
 
     fetchServerSyncConfig().then(updated => {
-      if (updated) fetchData(true);
+      if (updated) {
+        api.syncAllLocalToCloud().then(() => fetchData(true)).catch(() => fetchData(true));
+      }
     });
 
     api.syncPendingQueue().catch(() => {});
@@ -484,7 +487,14 @@ function MainApp() {
             }
           }}
           onOpenBudgetModal={() => setIsBudgetModalOpen(true)}
-          onOpenSupabaseModal={() => setIsSupabaseModalOpen(true)}
+          onOpenSupabaseModal={() => {
+            setSupabaseModalTab('connect');
+            setIsSupabaseModalOpen(true);
+          }}
+          onOpenSpouseSync={() => {
+            setSupabaseModalTab('spouse_sync');
+            setIsSupabaseModalOpen(true);
+          }}
           onLockApp={handleLockApp}
           onSeedDemoData={transactions.length === 0 ? handleSeedData : undefined}
         />
@@ -501,6 +511,12 @@ function MainApp() {
               onOpenBudgetModal={() => setIsBudgetModalOpen(true)}
               onOpenNewDebt={() => handleOpenUnifiedModal('debt_ledger')}
               onOpenNewSaving={() => handleOpenUnifiedModal('savings')}
+              onOpenSpouseSync={() => {
+                setSupabaseModalTab('spouse_sync');
+                setIsSupabaseModalOpen(true);
+              }}
+              onManualSync={handleManualSync}
+              isSyncing={isManualSyncing}
             />
           )}
 

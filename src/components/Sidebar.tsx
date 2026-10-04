@@ -11,7 +11,8 @@ import {
   Briefcase,
   Database,
   ExternalLink,
-  Lock
+  Lock,
+  Heart
 } from 'lucide-react';
 
 export type NavTab = 'dashboard' | 'transactions' | 'debts' | 'business' | 'savings' | 'reports';
@@ -21,6 +22,7 @@ interface SidebarProps {
   onTabChange: (tab: NavTab) => void;
   onOpenBudgetModal: () => void;
   onOpenSupabaseModal?: () => void;
+  onOpenSpouseSync?: () => void;
   onSeedDemoData?: () => void;
   onLockApp?: () => void;
 }
@@ -30,6 +32,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onTabChange,
   onOpenBudgetModal,
   onOpenSupabaseModal,
+  onOpenSpouseSync,
   onSeedDemoData,
   onLockApp,
 }) => {
@@ -100,6 +103,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
             Atur Batas Anggaran
           </button>
         </div>
+
+        {/* Quick Spouse Pairing CTA */}
+        {onOpenSpouseSync && (
+          <button
+            onClick={onOpenSpouseSync}
+            className="text-left p-2.5 rounded-xl bg-emerald-950/20 hover:bg-emerald-950/30 border border-emerald-300/40 text-[11px] text-white transition-all cursor-pointer group"
+          >
+            <div className="flex items-center justify-between mb-1">
+              <span className="font-extrabold text-white flex items-center gap-1.5">
+                <Heart className="w-3.5 h-3.5 text-emerald-300 fill-emerald-300 group-hover:scale-110 transition-transform" />
+                Tautkan Pasangan
+              </span>
+              <span className="text-[9px] bg-emerald-500/80 px-1.5 py-0.2 rounded font-bold text-white">
+                Sinkron
+              </span>
+            </div>
+            <p className="text-[10px] text-emerald-100/90 leading-tight">
+              Sinkronkan data HP suami & istri secara realtime tanpa selisih.
+            </p>
+          </button>
+        )}
 
         {/* Database & Supabase CTA badge */}
         {onOpenSupabaseModal ? (
