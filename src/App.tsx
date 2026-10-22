@@ -160,10 +160,10 @@ function MainApp() {
   const fetchDataRef = useRef(fetchData);
   fetchDataRef.current = fetchData;
 
-  // Background fetch when month period changes
+  // Background fetch when month period or tab changes
   useEffect(() => {
     fetchData(true);
-  }, [currentPeriod]);
+  }, [currentPeriod, currentTab]);
 
   // Lazy fetch reports when switching to reports tab
   useEffect(() => {
@@ -178,25 +178,25 @@ function MainApp() {
     }
   }, [currentTab, currentPeriod, api]);
 
-  // 1. Initial Pairing detection & Server config check
+  // 1. Initial Pairing detection & Server config check & Full 2-Way Device Sync
   useEffect(() => {
-    const pairResult = checkAndApplyUrlPairing();
-    if (pairResult.paired) {
-      setJustPairedBanner(true);
-      api.syncAllLocalToCloud().then(() => fetchData(true)).catch(() => fetchData(true));
-    } else if (typeof window !== 'undefined' && localStorage.getItem('keluargafin_just_paired') === 'true') {
-      setJustPairedBanner(true);
-      localStorage.removeItem('keluargafin_just_paired');
-      api.syncAllLocalToCloud().then(() => fetchData(true)).catch(() => fetchData(true));
-    }
-
-    fetchServerSyncConfig().then(updated => {
-      if (updated) {
-        api.syncAllLocalToCloud().then(() => fetchData(true)).catch(() => fetchData(true));
+    const initDeviceSync = async () => {
+      const pairResult = checkAndApplyUrlPairing();
+      if (pairResult.paired) {
+        setJustPairedBanner(true);
+      } else if (typeof window !== 'undefined' && localStorage.getItem('keluargafin_just_paired') === 'true') {
+        setJustPairedBanner(true);
+        localStorage.removeItem('keluargafin_just_paired');
       }
-    });
 
-    api.syncPendingQueue().catch(() => {});
+      await fetchServerSyncConfig().catch(() => false);
+      await api.syncPendingQueue().catch(() => {});
+      await api.syncAllLocalToCloud().catch(() => {});
+      await api.syncCloudToLocal().catch(() => {});
+      await fetchData(true);
+    };
+
+    initDeviceSync().catch(console.error);
   }, [api, fetchData]);
 
   // 2. Listen to Supabase credential changes in runtime
@@ -215,8 +215,9 @@ function MainApp() {
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     const triggerDebouncedFetch = () => {
       if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        api.syncPendingQueue().catch(() => {});
+      debounceTimer = setTimeout(async () => {
+        await api.syncPendingQueue().catch(() => {});
+        await api.syncCloudToLocal().catch(() => {});
         fetchDataRef.current(true);
       }, 250);
     };
@@ -233,9 +234,10 @@ function MainApp() {
       .subscribe();
 
     // Mobile sleep & app-switch resiliency: sync when user returns to app
-    const handleVisibilityOrFocus = () => {
+    const handleVisibilityOrFocus = async () => {
       if (document.visibilityState === 'visible') {
-        api.syncPendingQueue().catch(() => {});
+        await api.syncPendingQueue().catch(() => {});
+        await api.syncCloudToLocal().catch(() => {});
         fetchDataRef.current(true);
       }
     };
@@ -269,6 +271,7 @@ function MainApp() {
     try {
       await api.syncPendingQueue();
       await api.syncAllLocalToCloud();
+      await api.syncCloudToLocal();
       await fetchData();
     } catch (err) {
       console.warn('Manual sync warning:', err);

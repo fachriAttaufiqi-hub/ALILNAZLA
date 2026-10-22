@@ -153,24 +153,26 @@ export const checkAndApplyUrlPairing = (): { paired: boolean; url?: string; mess
   return { paired: false };
 };
 
-// Fetch shared family credentials from server if available and not yet set locally
+// Fetch shared family credentials from server to guarantee both spouses connect to the exact same cloud DB
 export const fetchServerSyncConfig = async (): Promise<boolean> => {
   if (typeof window === 'undefined') return false;
-  // If user already configured their own URL locally, preserve it
-  if (localStorage.getItem('supabase_url')) return false;
 
   try {
     const res = await fetch('/api/sync/config');
     if (res.ok) {
       const data = await res.json();
       if (data.configured && data.url && data.key) {
-        if (data.url !== cleanSupabaseUrl || data.key !== cleanSupabaseKey) {
-          saveSupabaseConfig(data.url, data.key);
+        const normalizedUrl = String(data.url).trim().replace(/\/rest\/v1\/?$/, '').replace(/\/+$/, '');
+        const normalizedKey = String(data.key).trim();
+        if (normalizedUrl !== cleanSupabaseUrl || normalizedKey !== cleanSupabaseKey) {
+          saveSupabaseConfig(normalizedUrl, normalizedKey);
           return true;
         }
       }
     }
-  } catch {}
+  } catch (e) {
+    console.warn('Gagal menyelaraskan konfigurasi database keluarga:', e);
+  }
   return false;
 };
 

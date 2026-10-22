@@ -251,11 +251,72 @@ async function startServer() {
   app.get('/api/dashboard/summary', requireAuth, async (req: AuthRequest, res) => {
     try {
       const now = new Date();
-      const currentPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      const currentPeriod = (req.query.period as string) || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+      if (isSupabaseApiKeyConfigured && supabase) {
+        const [txRes, dbRes, svRes, uRes] = await Promise.all([
+          supabase.from('transactions').select('*').gte('date', `${currentPeriod}-01`).lte('date', `${currentPeriod}-31`),
+          supabase.from('debts').select('*'),
+          supabase.from('savings').select('*'),
+          supabase.from('users').select('monthly_budget').eq('uid', SHARED_FAMILY_UID).maybeSingle(),
+        ]);
+
+        const txList = txRes.data || [];
+        const dbList = dbRes.data || [];
+        const svList = svRes.data || [];
+        const budget = parseFloat(uRes.data?.monthly_budget || '4000000');
+
+        let totalIncome = 0;
+        let totalExpense = 0;
+        txList.forEach((tx: any) => {
+          const val = parseFloat(tx.amount || '0');
+          if (tx.type === 'income') totalIncome += val;
+          else if (tx.type === 'expense') totalExpense += val;
+        });
+
+        const totalSavingsAccumulated = svList.reduce((acc: number, s: any) => acc + parseFloat(s.current_amount || '0'), 0);
+        const totalSavingsTarget = svList.reduce((acc: number, s: any) => acc + parseFloat(s.target_amount || '0'), 0);
+
+        let totalDebtRemaining = 0;
+        let totalReceivableRemaining = 0;
+        dbList.forEach((d: any) => {
+          if (d.status === 'active') {
+            const rem = Math.max(0, parseFloat(d.total_amount || '0') - parseFloat(d.paid_amount || '0'));
+            if (d.type === 'debt') totalDebtRemaining += rem;
+            else if (d.type === 'receivable') totalReceivableRemaining += rem;
+          }
+        });
+
+        const recentTransactions = [...txList].sort((a: any, b: any) => b.date.localeCompare(a.date)).slice(0, 5).map((t: any) => ({
+          id: t.id,
+          userUid: t.user_uid || SHARED_FAMILY_UID,
+          type: t.type,
+          category: t.category,
+          amount: String(t.amount),
+          date: t.date,
+          wallet: t.wallet || 'Tunai',
+          notes: t.notes || '',
+          createdAt: t.created_at,
+        }));
+
+        return res.json({
+          period: currentPeriod,
+          totalIncome,
+          totalExpense,
+          netCashflow: totalIncome - totalExpense,
+          monthlyBudget: budget,
+          budgetUsedPercent: budget > 0 ? Math.min(100, Math.round((totalExpense / budget) * 100)) : 0,
+          totalSavingsAccumulated,
+          totalSavingsTarget,
+          totalDebtRemaining,
+          totalReceivableRemaining,
+          recentTransactions,
+        });
+      }
 
       // Get shared family budget
       const familyUser = await db.select().from(users).where(eq(users.uid, SHARED_FAMILY_UID)).limit(1);
-      const budget = parseFloat(familyUser[0]?.monthlyBudget || '15000000');
+      const budget = parseFloat(familyUser[0]?.monthlyBudget || '4000000');
 
       // Get all transactions for current month (all members)
       const startOfMonth = `${currentPeriod}-01`;
@@ -322,6 +383,37 @@ async function startServer() {
   app.get('/api/transactions', requireAuth, async (req: AuthRequest, res) => {
     try {
       const { period, type, category, limit } = req.query;
+
+      if (isSupabaseApiKeyConfigured && supabase) {
+        let q = supabase.from('transactions').select('*').order('date', { ascending: false });
+        if (period && typeof period === 'string') {
+          q = q.gte('date', `${period}-01`).lte('date', `${period}-31`);
+        }
+        if (type && (type === 'income' || type === 'expense')) {
+          q = q.eq('type', type);
+        }
+        if (category && typeof category === 'string' && category !== 'Semua') {
+          q = q.eq('category', category);
+        }
+        if (limit) {
+          q = q.limit(parseInt(limit as string, 10));
+        }
+        const { data, error } = await q;
+        if (!error && data) {
+          const list = data.map((t: any) => ({
+            id: t.id,
+            userUid: t.user_uid || SHARED_FAMILY_UID,
+            type: t.type,
+            category: t.category,
+            amount: String(t.amount),
+            date: t.date,
+            wallet: t.wallet || 'Tunai',
+            notes: t.notes || '',
+            createdAt: t.created_at,
+          }));
+          return res.json(list);
+        }
+      }
 
       // Ambil seluruh transaksi keluarga
       const conditions: any[] = [];
@@ -450,6 +542,26 @@ async function startServer() {
   // --- DEBTS & RECEIVABLES CRUD (Shared Family Household) ---
   app.get('/api/debts', requireAuth, async (req: AuthRequest, res) => {
     try {
+      if (isSupabaseApiKeyConfigured && supabase) {
+        const { data, error } = await supabase.from('debts').select('*').order('id', { ascending: false });
+        if (!error && data) {
+          const list = data.map((d: any) => ({
+            id: d.id,
+            userUid: d.user_uid || SHARED_FAMILY_UID,
+            type: d.type,
+            person: d.person,
+            totalAmount: String(d.total_amount),
+            paidAmount: String(d.paid_amount || '0'),
+            dueDate: d.due_date,
+            status: d.status || 'active',
+            notes: d.notes || '',
+            createdAt: d.created_at,
+            updatedAt: d.updated_at,
+          }));
+          return res.json(list);
+        }
+      }
+
       const list = await db.select().from(debts)
         .orderBy(desc(debts.createdAt));
 
@@ -537,6 +649,45 @@ async function startServer() {
   app.get('/api/debts/:id/ledger', requireAuth, async (req: AuthRequest, res) => {
     try {
       const debtId = parseInt(req.params.id, 10);
+
+      if (isSupabaseApiKeyConfigured && supabase) {
+        const [debtRes, ledgerRes] = await Promise.all([
+          supabase.from('debts').select('*').eq('id', debtId).maybeSingle(),
+          supabase.from('debt_ledger_entries').select('*').eq('debt_id', debtId).order('date', { ascending: true }),
+        ]);
+
+        if (debtRes.data) {
+          const debtData = {
+            id: debtRes.data.id,
+            userUid: debtRes.data.user_uid || SHARED_FAMILY_UID,
+            type: debtRes.data.type,
+            person: debtRes.data.person,
+            totalAmount: String(debtRes.data.total_amount),
+            paidAmount: String(debtRes.data.paid_amount || '0'),
+            dueDate: debtRes.data.due_date,
+            status: debtRes.data.status || 'active',
+            notes: debtRes.data.notes || '',
+            createdAt: debtRes.data.created_at,
+            updatedAt: debtRes.data.updated_at,
+          };
+          const entriesData = (ledgerRes.data || []).map((e: any) => ({
+            id: e.id,
+            debtId: e.debt_id,
+            userUid: e.user_uid || SHARED_FAMILY_UID,
+            date: e.date,
+            type: e.type,
+            amount: String(e.amount),
+            balanceAfter: String(e.balance_after),
+            wallet: e.wallet || 'Tunai',
+            notes: e.notes || '',
+            createdAt: e.created_at,
+          }));
+          return res.json({
+            debt: debtData,
+            entries: entriesData,
+          });
+        }
+      }
 
       const debtCheck = await db.select().from(debts)
         .where(eq(debts.id, debtId))
@@ -751,6 +902,36 @@ async function startServer() {
   app.get('/api/business/transactions', requireAuth, async (req: AuthRequest, res) => {
     try {
       const { period, type, category } = req.query;
+
+      if (isSupabaseApiKeyConfigured && supabase) {
+        let q = supabase.from('business_transactions').select('*').order('date', { ascending: false });
+        if (period && typeof period === 'string') {
+          q = q.gte('date', `${period}-01`).lte('date', `${period}-31`);
+        }
+        if (type && (type === 'income' || type === 'expense')) {
+          q = q.eq('type', type);
+        }
+        if (category && typeof category === 'string' && category !== 'Semua') {
+          q = q.eq('category', category);
+        }
+        const { data, error } = await q;
+        if (!error && data) {
+          const list = data.map((b: any) => ({
+            id: b.id,
+            userUid: b.user_uid || SHARED_FAMILY_UID,
+            type: b.type,
+            category: b.category,
+            amount: String(b.amount),
+            date: b.date,
+            wallet: b.wallet || 'Kas Usaha',
+            customerOrVendor: b.customer_or_vendor || '',
+            invoiceNumber: b.invoice_number || '',
+            notes: b.notes || '',
+            createdAt: b.created_at,
+          }));
+          return res.json(list);
+        }
+      }
 
       const conditions: any[] = [];
 
@@ -1002,6 +1183,26 @@ async function startServer() {
   // --- SAVINGS & GOALS CRUD ---
   app.get('/api/savings', requireAuth, async (req: AuthRequest, res) => {
     try {
+      if (isSupabaseApiKeyConfigured && supabase) {
+        const { data, error } = await supabase.from('savings').select('*').order('id', { ascending: false });
+        if (!error && data) {
+          const list = data.map((s: any) => ({
+            id: s.id,
+            userUid: s.user_uid || SHARED_FAMILY_UID,
+            name: s.name,
+            targetAmount: String(s.target_amount),
+            currentAmount: String(s.current_amount || '0'),
+            targetDate: s.target_date,
+            category: s.category || 'Umum',
+            color: s.color || '#10b981',
+            notes: s.notes || '',
+            createdAt: s.created_at,
+            updatedAt: s.updated_at,
+          }));
+          return res.json(list);
+        }
+      }
+
       const uid = req.user!.uid;
       const list = await db.select().from(savings)
         .where(eq(savings.userUid, uid))

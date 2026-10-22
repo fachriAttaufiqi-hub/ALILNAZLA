@@ -292,12 +292,12 @@ const getInitialBusiness = (): BusinessTransaction[] => {
 
 // Persistent in-memory + LocalStorage cache
 const localCache = {
-  budget: loadFromStorage<string>(STORAGE_KEYS.BUDGET, '15000000'),
-  transactions: loadFromStorage<Transaction[]>(STORAGE_KEYS.TRANSACTIONS, getInitialTransactions()),
-  debts: loadFromStorage<Debt[]>(STORAGE_KEYS.DEBTS, getInitialDebts()),
-  debtLedger: loadFromStorage<DebtLedgerEntry[]>(STORAGE_KEYS.DEBT_LEDGER, getInitialDebtLedger()),
-  savings: loadFromStorage<Saving[]>(STORAGE_KEYS.SAVINGS, getInitialSavings()),
-  business: loadFromStorage<BusinessTransaction[]>(STORAGE_KEYS.BUSINESS, getInitialBusiness()),
+  budget: loadFromStorage<string>(STORAGE_KEYS.BUDGET, '4000000'),
+  transactions: loadFromStorage<Transaction[]>(STORAGE_KEYS.TRANSACTIONS, []),
+  debts: loadFromStorage<Debt[]>(STORAGE_KEYS.DEBTS, []),
+  debtLedger: loadFromStorage<DebtLedgerEntry[]>(STORAGE_KEYS.DEBT_LEDGER, []),
+  savings: loadFromStorage<Saving[]>(STORAGE_KEYS.SAVINGS, []),
+  business: loadFromStorage<BusinessTransaction[]>(STORAGE_KEYS.BUSINESS, []),
   reportsHistory: loadFromStorage<MonthlyReportRecord[]>(STORAGE_KEYS.REPORTS, []),
 };
 
@@ -315,7 +315,7 @@ export const computeDashboardSummary = (period: string): DashboardSummary => {
   const curTx = localCache.transactions.filter(t => t.date.startsWith(period));
   const inc = curTx.filter(t => t.type === 'income').reduce((a, b) => a + parseFloat(b.amount || '0'), 0);
   const exp = curTx.filter(t => t.type === 'expense').reduce((a, b) => a + parseFloat(b.amount || '0'), 0);
-  const bgt = parseFloat(localCache.budget || '0');
+  const bgt = parseFloat(localCache.budget || '4000000');
 
   const totSav = localCache.savings.reduce((a, b) => a + parseFloat(b.currentAmount || '0'), 0);
   const totSavTar = localCache.savings.reduce((a, b) => a + parseFloat(b.targetAmount || '0'), 0);
@@ -330,6 +330,10 @@ export const computeDashboardSummary = (period: string): DashboardSummary => {
     }
   });
 
+  const sortedRecent = [...localCache.transactions]
+    .sort((a, b) => b.date.localeCompare(a.date) || ((b.id || 0) - (a.id || 0)))
+    .slice(0, 5);
+
   return {
     period,
     totalIncome: inc,
@@ -341,7 +345,7 @@ export const computeDashboardSummary = (period: string): DashboardSummary => {
     totalSavingsTarget: totSavTar,
     totalDebtRemaining: totDebt,
     totalReceivableRemaining: totRec,
-    recentTransactions: [...localCache.transactions].slice(0, 5),
+    recentTransactions: sortedRecent,
   };
 };
 
@@ -358,13 +362,13 @@ export class ApiClient {
 
   // Universal request with automatic fallback to Direct Supabase or LocalStorage
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-    const isStaticHost = typeof window !== 'undefined' && 
-      (window.location.hostname.includes('netlify.app') || 
-       window.location.hostname.includes('github.io') || 
-       !window.location.port.includes('3000'));
+    // When Supabase is configured, use direct Supabase client to ensure 100% data consistency
+    // across all devices, mobile, laptop, Cloud Run, and PWA without host/port discrepancies.
+    if (supabase) {
+      return this.handleFallbackRequest<T>(endpoint, options);
+    }
 
-    // Try Express backend if running and not definitively static
-    if (!isStaticHost && isBackendAvailable) {
+    if (isBackendAvailable) {
       try {
         const token = await this.getToken();
         const headers: Record<string, string> = {
@@ -374,7 +378,7 @@ export class ApiClient {
         };
 
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 1200);
+        const timeoutId = setTimeout(() => controller.abort(), 1500);
 
         const res = await fetch(endpoint, {
           ...options,
@@ -387,7 +391,6 @@ export class ApiClient {
           return await res.json();
         }
       } catch (err) {
-        // Backend not responsive, fallback directly
         isBackendAvailable = false;
       }
     }
@@ -442,9 +445,93 @@ export class ApiClient {
       return { success: true, monthlyBudget: localCache.budget } as T;
     }
 
-    // 3. Dashboard Summary (Fast in-memory computation from localCache)
+    // 3. Dashboard Summary (Live computation from cloud or localCache)
     if (pathname === '/api/dashboard/summary') {
       const currentPeriod = url.searchParams.get('period') || new Date().toISOString().slice(0, 7);
+      if (supabase) {
+        try {
+          const [txRes, dbRes, svRes, uRes] = await Promise.all([
+            supabase.from('transactions').select('*').order('date', { ascending: false }).order('id', { ascending: false }),
+            supabase.from('debts').select('*').order('id', { ascending: false }),
+            supabase.from('savings').select('*').order('id', { ascending: false }),
+            supabase.from('users').select('monthly_budget').eq('uid', 'keluarga_utama').maybeSingle(),
+          ]);
+
+          if (txRes.data && !txRes.error) {
+            const cloudTxs = txRes.data.map((row: any) => ({
+              id: row.id,
+              userUid: row.user_uid || 'keluarga_utama',
+              type: row.type,
+              category: row.category,
+              amount: String(row.amount),
+              date: row.date,
+              wallet: row.wallet || 'Tunai',
+              notes: row.notes || '',
+              createdAt: row.created_at,
+            }));
+            const seenMap = new Map<number, Transaction>();
+            cloudTxs.forEach((t: Transaction) => seenMap.set(t.id, t));
+            localCache.transactions.forEach((t: Transaction) => {
+              if (t.id > 100000000000 && !seenMap.has(t.id)) seenMap.set(t.id, t);
+            });
+            localCache.transactions = Array.from(seenMap.values()).sort((a, b) => b.date.localeCompare(a.date) || ((b.id || 0) - (a.id || 0)));
+            saveToStorage(STORAGE_KEYS.TRANSACTIONS, localCache.transactions);
+          }
+
+          if (dbRes.data && !dbRes.error) {
+            const cloudDebts = dbRes.data.map((row: any) => ({
+              id: row.id,
+              userUid: row.user_uid || 'keluarga_utama',
+              type: row.type,
+              person: row.person,
+              totalAmount: String(row.total_amount),
+              paidAmount: String(row.paid_amount || '0'),
+              dueDate: row.due_date || null,
+              status: row.status || 'active',
+              notes: row.notes || '',
+              createdAt: row.created_at,
+              updatedAt: row.updated_at,
+            }));
+            const seenMap = new Map<number, Debt>();
+            cloudDebts.forEach((d: Debt) => seenMap.set(d.id, d));
+            localCache.debts.forEach((d: Debt) => {
+              if (d.id > 100000000000 && !seenMap.has(d.id)) seenMap.set(d.id, d);
+            });
+            localCache.debts = Array.from(seenMap.values()).sort((a, b) => (b.id || 0) - (a.id || 0));
+            saveToStorage(STORAGE_KEYS.DEBTS, localCache.debts);
+          }
+
+          if (svRes.data && !svRes.error) {
+            const cloudSavings = svRes.data.map((row: any) => ({
+              id: row.id,
+              userUid: row.user_uid || 'keluarga_utama',
+              name: row.name,
+              targetAmount: String(row.target_amount),
+              currentAmount: String(row.current_amount || '0'),
+              targetDate: row.target_date || null,
+              category: row.category || 'Umum',
+              color: row.color || '#10b981',
+              notes: row.notes || '',
+              createdAt: row.created_at,
+              updatedAt: row.updated_at,
+            }));
+            const seenMap = new Map<number, Saving>();
+            cloudSavings.forEach((s: Saving) => seenMap.set(s.id, s));
+            localCache.savings.forEach((s: Saving) => {
+              if (s.id > 100000000000 && !seenMap.has(s.id)) seenMap.set(s.id, s);
+            });
+            localCache.savings = Array.from(seenMap.values()).sort((a, b) => (b.id || 0) - (a.id || 0));
+            saveToStorage(STORAGE_KEYS.SAVINGS, localCache.savings);
+          }
+
+          if (uRes.data?.monthly_budget) {
+            localCache.budget = String(uRes.data.monthly_budget);
+            saveToStorage(STORAGE_KEYS.BUDGET, localCache.budget);
+          }
+        } catch (e: any) {
+          console.warn('Live fetch for dashboard summary error:', e?.message);
+        }
+      }
       return computeDashboardSummary(currentPeriod) as T;
     }
 
@@ -460,7 +547,8 @@ export class ApiClient {
             const { data, error } = await supabase
               .from('transactions')
               .select('*')
-              .order('date', { ascending: false });
+              .order('date', { ascending: false })
+              .order('id', { ascending: false });
 
             if (!error && data !== null) {
               const cloudTxs = data.map((row: any) => ({
@@ -485,7 +573,7 @@ export class ApiClient {
                 }
               });
 
-              localCache.transactions = Array.from(seenMap.values());
+              localCache.transactions = Array.from(seenMap.values()).sort((a, b) => b.date.localeCompare(a.date) || ((b.id || 0) - (a.id || 0)));
               saveToStorage(STORAGE_KEYS.TRANSACTIONS, localCache.transactions);
             }
           } catch (e: any) {
@@ -497,7 +585,7 @@ export class ApiClient {
         if (period) res = res.filter(t => t.date.startsWith(period));
         if (type && type !== 'Semua' && type !== 'all') res = res.filter(t => t.type === type);
         if (cat && cat !== 'Semua' && cat !== 'all') res = res.filter(t => t.category === cat);
-        res.sort((a, b) => b.date.localeCompare(a.date));
+        res.sort((a, b) => b.date.localeCompare(a.date) || ((b.id || 0) - (a.id || 0)));
         return res as T;
       }
 
@@ -639,14 +727,14 @@ export class ApiClient {
                 }
               });
 
-              localCache.debts = Array.from(seenMap.values());
+              localCache.debts = Array.from(seenMap.values()).sort((a, b) => (b.id || 0) - (a.id || 0));
               saveToStorage(STORAGE_KEYS.DEBTS, localCache.debts);
             }
           } catch (e: any) {
             console.warn('Supabase fetch debts error:', e?.message);
           }
         }
-        return [...localCache.debts] as T;
+        return [...localCache.debts].sort((a, b) => (b.id || 0) - (a.id || 0)) as T;
       }
 
       if (method === 'POST') {
@@ -754,7 +842,32 @@ export class ApiClient {
       const debtId = parseInt(parts[3], 10);
 
       if (method === 'GET') {
-        const debt = localCache.debts.find(d => d.id === debtId);
+        let debt = localCache.debts.find(d => d.id === debtId);
+        if (!debt && supabase) {
+          try {
+            const { data: dRow } = await supabase.from('debts').select('*').eq('id', debtId).maybeSingle();
+            if (dRow) {
+              debt = {
+                id: dRow.id,
+                userUid: dRow.user_uid || 'keluarga_utama',
+                type: dRow.type,
+                person: dRow.person,
+                totalAmount: String(dRow.total_amount),
+                paidAmount: String(dRow.paid_amount || '0'),
+                dueDate: dRow.due_date || null,
+                status: dRow.status || 'active',
+                notes: dRow.notes || '',
+                createdAt: dRow.created_at,
+                updatedAt: dRow.updated_at,
+              };
+              localCache.debts.unshift(debt);
+              saveToStorage(STORAGE_KEYS.DEBTS, localCache.debts);
+            }
+          } catch (e) {
+            console.warn('Fetch fallback debt error:', e);
+          }
+        }
+
         if (!debt) {
           throw new Error('Data hutang tidak ditemukan');
         }
@@ -765,7 +878,8 @@ export class ApiClient {
               .from('debt_ledger_entries')
               .select('*')
               .eq('debt_id', debtId)
-              .order('date', { ascending: true });
+              .order('date', { ascending: true })
+              .order('id', { ascending: true });
 
             if (data && data.length > 0) {
               const mappedEntries = data.map((row: any) => ({
@@ -792,7 +906,7 @@ export class ApiClient {
         }
 
         const entries = localCache.debtLedger.filter(e => e.debtId === debtId);
-        entries.sort((a, b) => a.date.localeCompare(b.date));
+        entries.sort((a, b) => a.date.localeCompare(b.date) || ((a.id || 0) - (b.id || 0)));
         return { debt, entries } as T;
       }
 
@@ -1078,14 +1192,14 @@ export class ApiClient {
                 }
               });
 
-              localCache.savings = Array.from(seenMap.values());
+              localCache.savings = Array.from(seenMap.values()).sort((a, b) => (b.id || 0) - (a.id || 0));
               saveToStorage(STORAGE_KEYS.SAVINGS, localCache.savings);
             }
           } catch (e: any) {
             console.warn('Supabase fetch savings error:', e?.message);
           }
         }
-        return [...localCache.savings] as T;
+        return [...localCache.savings].sort((a, b) => (b.id || 0) - (a.id || 0)) as T;
       }
 
       if (method === 'POST') {
@@ -1246,7 +1360,7 @@ export class ApiClient {
 
         if (supabase) {
           try {
-            const { data, error } = await supabase.from('business_transactions').select('*').order('date', { ascending: false });
+            const { data, error } = await supabase.from('business_transactions').select('*').order('date', { ascending: false }).order('id', { ascending: false });
             if (!error && data !== null) {
               const cloudBiz = data.map((row: any) => ({
                 id: row.id,
@@ -1270,7 +1384,7 @@ export class ApiClient {
                 }
               });
 
-              localCache.business = Array.from(seenMap.values());
+              localCache.business = Array.from(seenMap.values()).sort((a, b) => b.date.localeCompare(a.date) || ((b.id || 0) - (a.id || 0)));
               saveToStorage(STORAGE_KEYS.BUSINESS, localCache.business);
             }
           } catch (e: any) {
@@ -1280,7 +1394,7 @@ export class ApiClient {
 
         let res = [...localCache.business];
         if (period) res = res.filter(t => t.date.startsWith(period));
-        res.sort((a, b) => b.date.localeCompare(a.date));
+        res.sort((a, b) => b.date.localeCompare(a.date) || ((b.id || 0) - (a.id || 0)));
         return res as T;
       }
 
@@ -1385,6 +1499,42 @@ export class ApiClient {
 
     if (pathname === '/api/business/summary') {
       const period = url.searchParams.get('period') || new Date().toISOString().slice(0, 7);
+
+      if (supabase) {
+        try {
+          const { data, error } = await supabase
+            .from('business_transactions')
+            .select('*')
+            .order('date', { ascending: false });
+
+          if (!error && data !== null) {
+            const cloudBiz = data.map((row: any) => ({
+              id: row.id,
+              userUid: row.user_uid || 'keluarga_utama',
+              type: row.type,
+              category: row.category,
+              amount: String(row.amount),
+              date: row.date,
+              wallet: row.wallet || 'Kas Usaha',
+              customerOrVendor: row.customer_or_vendor || '',
+              invoiceNumber: row.invoice_number || '',
+              notes: row.notes || '',
+              createdAt: row.created_at,
+            }));
+
+            const seenMap = new Map<number, BusinessTransaction>();
+            cloudBiz.forEach((b: BusinessTransaction) => seenMap.set(b.id, b));
+            localCache.business.forEach((b: BusinessTransaction) => {
+              if (b.id > 100000000000 && !seenMap.has(b.id)) seenMap.set(b.id, b);
+            });
+            localCache.business = Array.from(seenMap.values());
+            saveToStorage(STORAGE_KEYS.BUSINESS, localCache.business);
+          }
+        } catch (e: any) {
+          console.warn('Live fetch for business summary error:', e?.message);
+        }
+      }
+
       const btx = localCache.business.filter(t => t.date.startsWith(period));
 
       let rev = 0;
@@ -1848,13 +1998,14 @@ export class ApiClient {
     try {
       let count = 0;
 
-      // 1. Transactions sync
-      if (localCache.transactions.length > 0) {
-        const { data: existingTx } = await supabase.from('transactions').select('id, date, amount');
-        const existingSet = new Set((existingTx || []).map((t: any) => `${t.date}-${t.amount}`));
+      // 1. Transactions sync (hanya push item lokal yang belum ada di cloud)
+      const localUnsyncedTxs = localCache.transactions.filter(t => t.id > 100000000000);
+      if (localUnsyncedTxs.length > 0) {
+        const { data: existingTx } = await supabase.from('transactions').select('date, amount, notes');
+        const existingSet = new Set((existingTx || []).map((t: any) => `${t.date}-${t.amount}-${t.notes || ''}`));
 
-        const toPush = localCache.transactions
-          .filter(t => !existingSet.has(`${t.date}-${t.amount}`))
+        const toPush = localUnsyncedTxs
+          .filter(t => !existingSet.has(`${t.date}-${t.amount}-${t.notes || ''}`))
           .map(t => ({
             user_uid: 'keluarga_utama',
             type: t.type,
@@ -1871,12 +2022,13 @@ export class ApiClient {
         }
       }
 
-      // 2. Debts sync
-      if (localCache.debts.length > 0) {
+      // 2. Debts sync (hanya push item lokal yang belum ada di cloud)
+      const localUnsyncedDebts = localCache.debts.filter(d => d.id > 100000000000);
+      if (localUnsyncedDebts.length > 0) {
         const { data: existingDebts } = await supabase.from('debts').select('person, total_amount');
         const existingSet = new Set((existingDebts || []).map((d: any) => `${d.person}-${d.total_amount}`));
 
-        const toPush = localCache.debts
+        const toPush = localUnsyncedDebts
           .filter(d => !existingSet.has(`${d.person}-${d.totalAmount}`))
           .map(d => ({
             user_uid: 'keluarga_utama',
@@ -1896,11 +2048,12 @@ export class ApiClient {
       }
 
       // 3. Savings sync
-      if (localCache.savings.length > 0) {
+      const localUnsyncedSavings = localCache.savings.filter(s => s.id > 100000000000);
+      if (localUnsyncedSavings.length > 0) {
         const { data: existingSavings } = await supabase.from('savings').select('name, target_amount');
         const existingSet = new Set((existingSavings || []).map((s: any) => `${s.name}-${s.target_amount}`));
 
-        const toPush = localCache.savings
+        const toPush = localUnsyncedSavings
           .filter(s => !existingSet.has(`${s.name}-${s.targetAmount}`))
           .map(s => ({
             user_uid: 'keluarga_utama',
@@ -1919,7 +2072,58 @@ export class ApiClient {
         }
       }
 
-      // 4. Budget sync
+      // 4. Business Transactions sync
+      const localUnsyncedBiz = localCache.business.filter(b => b.id > 100000000000);
+      if (localUnsyncedBiz.length > 0) {
+        const { data: existingBiz } = await supabase.from('business_transactions').select('date, amount, category');
+        const existingSet = new Set((existingBiz || []).map((b: any) => `${b.date}-${b.amount}-${b.category}`));
+
+        const toPush = localUnsyncedBiz
+          .filter(b => !existingSet.has(`${b.date}-${b.amount}-${b.category}`))
+          .map(b => ({
+            user_uid: 'keluarga_utama',
+            type: b.type,
+            category: b.category,
+            amount: parseFloat(b.amount || '0'),
+            date: b.date,
+            wallet: b.wallet || 'Kas Usaha',
+            customer_or_vendor: b.customerOrVendor || '',
+            invoice_number: b.invoiceNumber || '',
+            notes: b.notes || '',
+          }));
+
+        if (toPush.length > 0) {
+          const { error } = await supabase.from('business_transactions').insert(toPush);
+          if (!error) count += toPush.length;
+        }
+      }
+
+      // 5. Debt Ledger Entries sync
+      const localUnsyncedLedger = localCache.debtLedger.filter(l => l.id > 100000000000);
+      if (localUnsyncedLedger.length > 0) {
+        const { data: existingLedger } = await supabase.from('debt_ledger_entries').select('debt_id, date, amount');
+        const existingSet = new Set((existingLedger || []).map((l: any) => `${l.debt_id}-${l.date}-${l.amount}`));
+
+        const toPush = localUnsyncedLedger
+          .filter(l => !existingSet.has(`${l.debtId}-${l.date}-${l.amount}`))
+          .map(l => ({
+            debt_id: l.debtId,
+            user_uid: 'keluarga_utama',
+            date: l.date,
+            type: l.type,
+            amount: parseFloat(l.amount || '0'),
+            balance_after: parseFloat(l.balanceAfter || '0'),
+            wallet: l.wallet || 'Tunai',
+            notes: l.notes || '',
+          }));
+
+        if (toPush.length > 0) {
+          const { error } = await supabase.from('debt_ledger_entries').insert(toPush);
+          if (!error) count += toPush.length;
+        }
+      }
+
+      // 6. Budget sync
       await supabase.from('users').upsert({
         uid: 'keluarga_utama',
         email: 'keluarga@keluargafin.id',
@@ -1927,10 +2131,8 @@ export class ApiClient {
         monthly_budget: String(localCache.budget),
       }, { onConflict: 'uid' });
 
-      // Refresh local cache from Supabase
-      await this.getTransactions();
-      await this.getDebts();
-      await this.getSavings();
+      // Tarik seluruh data terbaru dari Cloud ke LocalStorage gawai ini
+      await this.syncCloudToLocal();
 
       return {
         success: true,
@@ -1942,6 +2144,170 @@ export class ApiClient {
         success: false,
         message: err.message || 'Gagal sinkronisasi data',
         count: 0,
+      };
+    }
+  }
+
+  // Sinkronisasi menyeluruh dari Supabase Cloud ke memori & LocalStorage perangkat
+  async syncCloudToLocal(): Promise<{ success: boolean; txCount: number; debtCount: number; bizCount: number; savCount: number }> {
+    if (!supabase) {
+      return {
+        success: false,
+        txCount: localCache.transactions.length,
+        debtCount: localCache.debts.length,
+        bizCount: localCache.business.length,
+        savCount: localCache.savings.length,
+      };
+    }
+
+    try {
+      const [txRes, dbRes, dlRes, svRes, bzRes, uRes] = await Promise.all([
+        supabase.from('transactions').select('*').order('date', { ascending: false }).order('id', { ascending: false }),
+        supabase.from('debts').select('*').order('id', { ascending: false }),
+        supabase.from('debt_ledger_entries').select('*').order('date', { ascending: true }).order('id', { ascending: true }),
+        supabase.from('savings').select('*').order('id', { ascending: false }),
+        supabase.from('business_transactions').select('*').order('date', { ascending: false }).order('id', { ascending: false }),
+        supabase.from('users').select('monthly_budget').eq('uid', 'keluarga_utama').maybeSingle(),
+      ]);
+
+      // 1. Transactions
+      if (txRes.data && !txRes.error) {
+        const cloudTxs = txRes.data.map((row: any) => ({
+          id: row.id,
+          userUid: row.user_uid || 'keluarga_utama',
+          type: row.type,
+          category: row.category,
+          amount: String(row.amount),
+          date: row.date,
+          wallet: row.wallet || 'Tunai',
+          notes: row.notes || '',
+          createdAt: row.created_at,
+        }));
+        const seenMap = new Map<number, Transaction>();
+        cloudTxs.forEach((t: Transaction) => seenMap.set(t.id, t));
+        localCache.transactions.forEach((t: Transaction) => {
+          if (t.id > 100000000000 && !seenMap.has(t.id)) seenMap.set(t.id, t);
+        });
+        localCache.transactions = Array.from(seenMap.values()).sort((a, b) => b.date.localeCompare(a.date) || ((b.id || 0) - (a.id || 0)));
+        saveToStorage(STORAGE_KEYS.TRANSACTIONS, localCache.transactions);
+      }
+
+      // 2. Debts
+      if (dbRes.data && !dbRes.error) {
+        const cloudDebts = dbRes.data.map((row: any) => ({
+          id: row.id,
+          userUid: row.user_uid || 'keluarga_utama',
+          type: row.type,
+          person: row.person,
+          totalAmount: String(row.total_amount),
+          paidAmount: String(row.paid_amount || '0'),
+          dueDate: row.due_date || null,
+          status: row.status || 'active',
+          notes: row.notes || '',
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+        }));
+        const seenMap = new Map<number, Debt>();
+        cloudDebts.forEach((d: Debt) => seenMap.set(d.id, d));
+        localCache.debts.forEach((d: Debt) => {
+          if (d.id > 100000000000 && !seenMap.has(d.id)) seenMap.set(d.id, d);
+        });
+        localCache.debts = Array.from(seenMap.values()).sort((a, b) => (b.id || 0) - (a.id || 0));
+        saveToStorage(STORAGE_KEYS.DEBTS, localCache.debts);
+      }
+
+      // 3. Debt Ledger Entries
+      if (dlRes.data && !dlRes.error) {
+        const cloudLedger = dlRes.data.map((row: any) => ({
+          id: row.id,
+          debtId: row.debt_id,
+          userUid: row.user_uid || 'keluarga_utama',
+          date: row.date,
+          type: row.type,
+          amount: String(row.amount),
+          balanceAfter: String(row.balance_after),
+          wallet: row.wallet || 'Tunai',
+          notes: row.notes || '',
+          createdAt: row.created_at,
+        }));
+        const seenMap = new Map<number, DebtLedgerEntry>();
+        cloudLedger.forEach((l: DebtLedgerEntry) => seenMap.set(l.id, l));
+        localCache.debtLedger.forEach((l: DebtLedgerEntry) => {
+          if (l.id > 100000000000 && !seenMap.has(l.id)) seenMap.set(l.id, l);
+        });
+        localCache.debtLedger = Array.from(seenMap.values()).sort((a, b) => a.date.localeCompare(b.date) || ((a.id || 0) - (b.id || 0)));
+        saveToStorage(STORAGE_KEYS.DEBT_LEDGER, localCache.debtLedger);
+      }
+
+      // 4. Savings
+      if (svRes.data && !svRes.error) {
+        const cloudSavings = svRes.data.map((row: any) => ({
+          id: row.id,
+          userUid: row.user_uid || 'keluarga_utama',
+          name: row.name,
+          targetAmount: String(row.target_amount),
+          currentAmount: String(row.current_amount || '0'),
+          targetDate: row.target_date || null,
+          category: row.category || 'Umum',
+          color: row.color || '#10b981',
+          notes: row.notes || '',
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+        }));
+        const seenMap = new Map<number, Saving>();
+        cloudSavings.forEach((s: Saving) => seenMap.set(s.id, s));
+        localCache.savings.forEach((s: Saving) => {
+          if (s.id > 100000000000 && !seenMap.has(s.id)) seenMap.set(s.id, s);
+        });
+        localCache.savings = Array.from(seenMap.values()).sort((a, b) => (b.id || 0) - (a.id || 0));
+        saveToStorage(STORAGE_KEYS.SAVINGS, localCache.savings);
+      }
+
+      // 5. Business Transactions
+      if (bzRes.data && !bzRes.error) {
+        const cloudBiz = bzRes.data.map((row: any) => ({
+          id: row.id,
+          userUid: row.user_uid || 'keluarga_utama',
+          type: row.type,
+          category: row.category,
+          amount: String(row.amount),
+          date: row.date,
+          wallet: row.wallet || 'Kas Usaha',
+          customerOrVendor: row.customer_or_vendor || '',
+          invoiceNumber: row.invoice_number || '',
+          notes: row.notes || '',
+          createdAt: row.created_at,
+        }));
+        const seenMap = new Map<number, BusinessTransaction>();
+        cloudBiz.forEach((b: BusinessTransaction) => seenMap.set(b.id, b));
+        localCache.business.forEach((b: BusinessTransaction) => {
+          if (b.id > 100000000000 && !seenMap.has(b.id)) seenMap.set(b.id, b);
+        });
+        localCache.business = Array.from(seenMap.values()).sort((a, b) => b.date.localeCompare(a.date) || ((b.id || 0) - (a.id || 0)));
+        saveToStorage(STORAGE_KEYS.BUSINESS, localCache.business);
+      }
+
+      // 6. User budget
+      if (uRes.data?.monthly_budget) {
+        localCache.budget = String(uRes.data.monthly_budget);
+        saveToStorage(STORAGE_KEYS.BUDGET, localCache.budget);
+      }
+
+      return {
+        success: true,
+        txCount: localCache.transactions.length,
+        debtCount: localCache.debts.length,
+        bizCount: localCache.business.length,
+        savCount: localCache.savings.length,
+      };
+    } catch (e: any) {
+      console.warn('syncCloudToLocal error:', e);
+      return {
+        success: false,
+        txCount: localCache.transactions.length,
+        debtCount: localCache.debts.length,
+        bizCount: localCache.business.length,
+        savCount: localCache.savings.length,
       };
     }
   }
