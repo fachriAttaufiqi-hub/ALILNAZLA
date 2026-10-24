@@ -47,6 +47,17 @@ export interface DebtWithLedger {
   entries: DebtLedgerEntry[];
 }
 
+export interface BusinessProfile {
+  id: string;
+  name: string;
+  category?: string;
+  color?: string;
+  icon?: string;
+  description?: string;
+  defaultWallet?: string;
+  createdAt?: string;
+}
+
 export interface BusinessTransaction {
   id: number;
   userUid: string;
@@ -59,6 +70,8 @@ export interface BusinessTransaction {
   invoiceNumber?: string;
   notes?: string;
   createdAt?: string;
+  businessId?: string;
+  businessName?: string;
 }
 
 export interface BusinessSummary {
@@ -76,6 +89,13 @@ export interface BusinessSummary {
     percentage: number;
   }>;
   recentTransactions: BusinessTransaction[];
+  perBusinessBreakdown?: Array<{
+    businessName: string;
+    revenue: number;
+    expense: number;
+    netProfit: number;
+    count: number;
+  }>;
 }
 
 export interface Saving {

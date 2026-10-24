@@ -9,7 +9,8 @@ import {
   DebtWithLedger,
   DebtLedgerEntry,
   BusinessTransaction,
-  BusinessSummary
+  BusinessSummary,
+  BusinessProfile
 } from '../types/index.ts';
 import { supabase, isSupabaseApiKeyConfigured } from './supabase.ts';
 
@@ -21,6 +22,7 @@ const STORAGE_KEYS = {
   DEBT_LEDGER: 'keluargafin_debt_ledger_entries',
   SAVINGS: 'keluargafin_savings',
   BUSINESS: 'keluargafin_business_transactions',
+  BUSINESSES: 'keluargafin_businesses',
   REPORTS: 'keluargafin_monthly_reports',
   PENDING_SYNC: 'keluargafin_pending_sync_queue',
 };
@@ -290,6 +292,10 @@ const getInitialBusiness = (): BusinessTransaction[] => {
   ];
 };
 
+export const DEFAULT_BUSINESSES: BusinessProfile[] = [
+  { id: 'sawah', name: 'Pertanian & Sawah', category: 'Pertanian & Perkebunan', color: '#16a34a', icon: 'Sprout', defaultWallet: 'Kas Sampingan & Hobi (Tunai)' },
+];
+
 // Persistent in-memory + LocalStorage cache
 const localCache = {
   budget: loadFromStorage<string>(STORAGE_KEYS.BUDGET, '4000000'),
@@ -298,6 +304,7 @@ const localCache = {
   debtLedger: loadFromStorage<DebtLedgerEntry[]>(STORAGE_KEYS.DEBT_LEDGER, []),
   savings: loadFromStorage<Saving[]>(STORAGE_KEYS.SAVINGS, []),
   business: loadFromStorage<BusinessTransaction[]>(STORAGE_KEYS.BUSINESS, []),
+  businesses: loadFromStorage<BusinessProfile[]>(STORAGE_KEYS.BUSINESSES, DEFAULT_BUSINESSES),
   reportsHistory: loadFromStorage<MonthlyReportRecord[]>(STORAGE_KEYS.REPORTS, []),
 };
 
@@ -308,6 +315,7 @@ export const getCachedHouseholdSnapshot = () => ({
   debts: localCache.debts,
   savings: localCache.savings,
   business: localCache.business,
+  businesses: localCache.businesses,
 });
 
 // Fast in-memory summary computation without redundant network calls
@@ -1353,28 +1361,101 @@ export class ApiClient {
       return { success: true } as T;
     }
 
-    // 7. Business Transactions & Summary
+    // 7. Businesses List (Multi-Business Sampingan Management)
+    if (pathname === '/api/businesses') {
+      if (method === 'GET') {
+        if (supabase) {
+          try {
+            const { data } = await supabase.from('users').select('photo_url').eq('uid', 'keluarga_utama').maybeSingle();
+            if (data?.photo_url) {
+              try {
+                const parsed = JSON.parse(data.photo_url);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                  localCache.businesses = parsed;
+                  saveToStorage(STORAGE_KEYS.BUSINESSES, localCache.businesses);
+                  return localCache.businesses as T;
+                }
+              } catch {}
+            }
+          } catch (e: any) {
+            console.warn('Supabase fetch businesses error:', e?.message);
+          }
+        }
+        return (localCache.businesses || DEFAULT_BUSINESSES) as T;
+      }
+
+      if (method === 'POST') {
+        const body: BusinessProfile = JSON.parse(options.body as string);
+        const current = [...(localCache.businesses || DEFAULT_BUSINESSES)];
+        const existingIdx = current.findIndex(b => b.id === body.id || b.name.toLowerCase() === body.name.toLowerCase());
+        if (existingIdx >= 0) {
+          current[existingIdx] = { ...current[existingIdx], ...body };
+        } else {
+          current.push(body);
+        }
+        localCache.businesses = current;
+        saveToStorage(STORAGE_KEYS.BUSINESSES, current);
+
+        if (supabase) {
+          try {
+            await supabase.from('users').update({ photo_url: JSON.stringify(current) }).eq('uid', 'keluarga_utama');
+          } catch (e: any) {
+            console.warn('Supabase save businesses error:', e?.message);
+          }
+        }
+        return current as T;
+      }
+    }
+
+    if (pathname.startsWith('/api/businesses/') && method === 'DELETE') {
+      const bizId = pathname.split('/').pop() || '';
+      const current = (localCache.businesses || DEFAULT_BUSINESSES).filter(b => b.id !== bizId);
+      localCache.businesses = current;
+      saveToStorage(STORAGE_KEYS.BUSINESSES, current);
+
+      if (supabase) {
+        try {
+          await supabase.from('users').update({ photo_url: JSON.stringify(current) }).eq('uid', 'keluarga_utama');
+        } catch (e: any) {
+          console.warn('Supabase delete business error:', e?.message);
+        }
+      }
+      return current as T;
+    }
+
+    // 8. Business Transactions & Summary
     if (pathname === '/api/business/transactions') {
       if (method === 'GET') {
         const period = url.searchParams.get('period');
+        const bFilter = url.searchParams.get('business');
 
         if (supabase) {
           try {
             const { data, error } = await supabase.from('business_transactions').select('*').order('date', { ascending: false }).order('id', { ascending: false });
             if (!error && data !== null) {
-              const cloudBiz = data.map((row: any) => ({
-                id: row.id,
-                userUid: row.user_uid || 'keluarga_utama',
-                type: row.type,
-                category: row.category,
-                amount: String(row.amount),
-                date: row.date,
-                wallet: row.wallet || 'Kas Usaha',
-                customerOrVendor: row.customer_or_vendor || '',
-                invoiceNumber: row.invoice_number || '',
-                notes: row.notes || '',
-                createdAt: row.created_at,
-              }));
+              const cloudBiz = data.map((row: any) => {
+                let bName = 'Pertanian & Sawah';
+                let cleanInvoice = (row.invoice_number || '').trim();
+                if (cleanInvoice.startsWith('[') && cleanInvoice.includes(']')) {
+                  const endBracket = cleanInvoice.indexOf(']');
+                  bName = cleanInvoice.slice(1, endBracket).trim();
+                  cleanInvoice = cleanInvoice.slice(endBracket + 1).trim();
+                }
+                return {
+                  id: row.id,
+                  userUid: row.user_uid || 'keluarga_utama',
+                  type: row.type,
+                  category: row.category,
+                  amount: String(row.amount),
+                  date: row.date,
+                  wallet: row.wallet || 'Kas Sampingan & Hobi (Tunai)',
+                  customerOrVendor: row.customer_or_vendor || '',
+                  invoiceNumber: cleanInvoice,
+                  businessName: bName,
+                  notes: row.notes || '',
+                  createdAt: row.created_at,
+                };
+              });
 
               const seenMap = new Map<number, BusinessTransaction>();
               cloudBiz.forEach((b: BusinessTransaction) => seenMap.set(b.id, b));
@@ -1394,12 +1475,19 @@ export class ApiClient {
 
         let res = [...localCache.business];
         if (period) res = res.filter(t => t.date.startsWith(period));
+        if (bFilter && bFilter !== 'all' && bFilter !== 'Semua') {
+          res = res.filter(t => (t.businessName || 'Pertanian & Sawah') === bFilter);
+        }
         res.sort((a, b) => b.date.localeCompare(a.date) || ((b.id || 0) - (a.id || 0)));
         return res as T;
       }
 
       if (method === 'POST') {
         const body = JSON.parse(options.body as string);
+        const bName = body.businessName || 'Pertanian & Sawah';
+        const cleanInv = (body.invoiceNumber || '').trim();
+        const storedInvoice = cleanInv ? `[${bName}] ${cleanInv}` : `[${bName}]`;
+
         let newBiz: BusinessTransaction = {
           id: Date.now(),
           userUid: 'keluarga_utama',
@@ -1407,9 +1495,10 @@ export class ApiClient {
           category: body.category,
           amount: String(body.amount),
           date: body.date,
-          wallet: body.wallet || 'Kas Usaha',
+          wallet: body.wallet || 'Kas Sampingan & Hobi (Tunai)',
           customerOrVendor: body.customerOrVendor || '',
-          invoiceNumber: body.invoiceNumber || '',
+          invoiceNumber: cleanInv,
+          businessName: bName,
           notes: body.notes || '',
         };
 
@@ -1421,7 +1510,7 @@ export class ApiClient {
           date: newBiz.date,
           wallet: newBiz.wallet,
           customer_or_vendor: newBiz.customerOrVendor,
-          invoice_number: newBiz.invoiceNumber,
+          invoice_number: storedInvoice,
           notes: newBiz.notes,
         };
 
@@ -1455,6 +1544,9 @@ export class ApiClient {
     if (pathname.startsWith('/api/business/transactions/') && method === 'PUT') {
       const id = parseInt(pathname.split('/').pop() || '0', 10);
       const body = JSON.parse(options.body as string);
+      const bName = body.businessName || 'Pertanian & Sawah';
+      const cleanInv = (body.invoiceNumber || '').trim();
+      const storedInvoice = cleanInv ? `[${bName}] ${cleanInv}` : `[${bName}]`;
 
       if (supabase) {
         try {
@@ -1465,7 +1557,7 @@ export class ApiClient {
             date: body.date,
             wallet: body.wallet,
             customer_or_vendor: body.customerOrVendor,
-            invoice_number: body.invoiceNumber,
+            invoice_number: storedInvoice,
             notes: body.notes,
           }).eq('id', id);
         } catch (e: any) {
@@ -1475,7 +1567,12 @@ export class ApiClient {
 
       const idx = localCache.business.findIndex(b => b.id === id);
       if (idx !== -1) {
-        localCache.business[idx] = { ...localCache.business[idx], ...body };
+        localCache.business[idx] = { 
+          ...localCache.business[idx], 
+          ...body,
+          businessName: bName,
+          invoiceNumber: cleanInv
+        };
         saveToStorage(STORAGE_KEYS.BUSINESS, localCache.business);
         return localCache.business[idx] as T;
       }
@@ -1508,19 +1605,29 @@ export class ApiClient {
             .order('date', { ascending: false });
 
           if (!error && data !== null) {
-            const cloudBiz = data.map((row: any) => ({
-              id: row.id,
-              userUid: row.user_uid || 'keluarga_utama',
-              type: row.type,
-              category: row.category,
-              amount: String(row.amount),
-              date: row.date,
-              wallet: row.wallet || 'Kas Usaha',
-              customerOrVendor: row.customer_or_vendor || '',
-              invoiceNumber: row.invoice_number || '',
-              notes: row.notes || '',
-              createdAt: row.created_at,
-            }));
+            const cloudBiz = data.map((row: any) => {
+              let bName = 'Pertanian & Sawah';
+              let cleanInvoice = (row.invoice_number || '').trim();
+              if (cleanInvoice.startsWith('[') && cleanInvoice.includes(']')) {
+                const endBracket = cleanInvoice.indexOf(']');
+                bName = cleanInvoice.slice(1, endBracket).trim();
+                cleanInvoice = cleanInvoice.slice(endBracket + 1).trim();
+              }
+              return {
+                id: row.id,
+                userUid: row.user_uid || 'keluarga_utama',
+                type: row.type,
+                category: row.category,
+                amount: String(row.amount),
+                date: row.date,
+                wallet: row.wallet || 'Kas Sampingan & Hobi (Tunai)',
+                customerOrVendor: row.customer_or_vendor || '',
+                invoiceNumber: cleanInvoice,
+                businessName: bName,
+                notes: row.notes || '',
+                createdAt: row.created_at,
+              };
+            });
 
             const seenMap = new Map<number, BusinessTransaction>();
             cloudBiz.forEach((b: BusinessTransaction) => seenMap.set(b.id, b));
@@ -1543,13 +1650,20 @@ export class ApiClient {
       let opex = 0;
       let prive = 0;
       const categoryMap: Record<string, { total: number; count: number; type: string }> = {};
+      const perBizMap: Record<string, { revenue: number; expense: number; count: number }> = {};
 
       btx.forEach(t => {
         const val = parseFloat(t.amount || '0');
+        const b = t.businessName || 'Pertanian & Sawah';
+        if (!perBizMap[b]) perBizMap[b] = { revenue: 0, expense: 0, count: 0 };
+        perBizMap[b].count += 1;
+
         if (t.type === 'income') {
           rev += val;
+          perBizMap[b].revenue += val;
         } else {
           exp += val;
+          perBizMap[b].expense += val;
           const cat = t.category.toLowerCase();
           if (cat.includes('hpp') || cat.includes('bahan') || cat.includes('stok')) cogs += val;
           else if (cat.includes('prive') || cat.includes('keluarga')) prive += val;
@@ -1576,6 +1690,14 @@ export class ApiClient {
           : (exp > 0 ? Math.round((d.total / exp) * 1000) / 10 : 0),
       })).sort((a, b) => b.amount - a.amount);
 
+      const perBusinessBreakdown = Object.entries(perBizMap).map(([businessName, d]) => ({
+        businessName,
+        revenue: d.revenue,
+        expense: d.expense,
+        netProfit: d.revenue - d.expense,
+        count: d.count,
+      })).sort((a, b) => b.revenue - a.revenue);
+
       return {
         period,
         totalRevenue: rev,
@@ -1584,8 +1706,8 @@ export class ApiClient {
         profitMargin: margin,
         transactionCount: btx.length,
         breakdowns,
+        perBusinessBreakdown,
         recentTransactions: btx.slice(0, 10),
-        // backward compatibility fields
         revenue: rev,
         cogs,
         grossProfit: rev - cogs,
@@ -1910,12 +2032,30 @@ export class ApiClient {
     });
   }
 
-  // Usaha Sampingan (Business Ledger & P&L)
-  getBusinessTransactions(params?: { period?: string; type?: string; category?: string }) {
+  // Usaha Sampingan (Multi-Business Profiles & Ledger)
+  getBusinesses() {
+    return this.request<BusinessProfile[]>('/api/businesses');
+  }
+
+  saveBusiness(data: BusinessProfile) {
+    return this.request<BusinessProfile[]>('/api/businesses', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  deleteBusiness(id: string) {
+    return this.request<BusinessProfile[]>(`/api/businesses/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  getBusinessTransactions(params?: { period?: string; type?: string; category?: string; business?: string }) {
     const q = new URLSearchParams();
     if (params?.period) q.set('period', params.period);
     if (params?.type) q.set('type', params.type);
     if (params?.category) q.set('category', params.category);
+    if (params?.business) q.set('business', params.business);
     return this.request<BusinessTransaction[]>(`/api/business/transactions?${q.toString()}`);
   }
 
@@ -2265,19 +2405,29 @@ export class ApiClient {
 
       // 5. Business Transactions
       if (bzRes.data && !bzRes.error) {
-        const cloudBiz = bzRes.data.map((row: any) => ({
-          id: row.id,
-          userUid: row.user_uid || 'keluarga_utama',
-          type: row.type,
-          category: row.category,
-          amount: String(row.amount),
-          date: row.date,
-          wallet: row.wallet || 'Kas Usaha',
-          customerOrVendor: row.customer_or_vendor || '',
-          invoiceNumber: row.invoice_number || '',
-          notes: row.notes || '',
-          createdAt: row.created_at,
-        }));
+        const cloudBiz = bzRes.data.map((row: any) => {
+          let bName = 'Pertanian & Sawah';
+          let cleanInvoice = (row.invoice_number || '').trim();
+          if (cleanInvoice.startsWith('[') && cleanInvoice.includes(']')) {
+            const endBracket = cleanInvoice.indexOf(']');
+            bName = cleanInvoice.slice(1, endBracket).trim();
+            cleanInvoice = cleanInvoice.slice(endBracket + 1).trim();
+          }
+          return {
+            id: row.id,
+            userUid: row.user_uid || 'keluarga_utama',
+            type: row.type,
+            category: row.category,
+            amount: String(row.amount),
+            date: row.date,
+            wallet: row.wallet || 'Kas Sampingan & Hobi (Tunai)',
+            customerOrVendor: row.customer_or_vendor || '',
+            invoiceNumber: cleanInvoice,
+            businessName: bName,
+            notes: row.notes || '',
+            createdAt: row.created_at,
+          };
+        });
         const seenMap = new Map<number, BusinessTransaction>();
         cloudBiz.forEach((b: BusinessTransaction) => seenMap.set(b.id, b));
         localCache.business.forEach((b: BusinessTransaction) => {
@@ -2287,10 +2437,21 @@ export class ApiClient {
         saveToStorage(STORAGE_KEYS.BUSINESS, localCache.business);
       }
 
-      // 6. User budget
-      if (uRes.data?.monthly_budget) {
-        localCache.budget = String(uRes.data.monthly_budget);
-        saveToStorage(STORAGE_KEYS.BUDGET, localCache.budget);
+      // 6. User budget & businesses list
+      if (uRes.data) {
+        if (uRes.data.monthly_budget) {
+          localCache.budget = String(uRes.data.monthly_budget);
+          saveToStorage(STORAGE_KEYS.BUDGET, localCache.budget);
+        }
+        if (uRes.data.photo_url) {
+          try {
+            const parsed = JSON.parse(uRes.data.photo_url);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              localCache.businesses = parsed;
+              saveToStorage(STORAGE_KEYS.BUSINESSES, localCache.businesses);
+            }
+          } catch {}
+        }
       }
 
       return {
